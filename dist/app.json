@@ -1,0 +1,412 @@
+{
+  "format_version": 1,
+  "id": "com.ma-zierl.notes",
+  "version": "0.1.0",
+  "display_name": "Notes",
+  "description": "A local Markdown workspace with tags and autosave.",
+  "publisher": {
+    "name": "Manuel Zierl"
+  },
+  "license": "MIT",
+  "min_host_version": "0.1.0",
+  "manifest": {
+    "capabilities": [
+      {
+        "name": "create",
+        "description": "Create a Markdown note",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "title": {
+              "type": "string"
+            },
+            "body": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32
+              },
+              "maxItems": 24
+            }
+          },
+          "required": [
+            "body"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "local-write"
+      },
+      {
+        "name": "list_tree",
+        "description": "List notes in the workspace",
+        "input_schema": {
+          "type": "object",
+          "properties": {},
+          "additionalProperties": false
+        },
+        "effect": "read-only"
+      },
+      {
+        "name": "read",
+        "description": "Read a note",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "target"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "read-only"
+      },
+      {
+        "name": "write",
+        "description": "Write a Markdown note",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "string",
+              "minLength": 1
+            },
+            "title": {
+              "type": "string"
+            },
+            "body": {
+              "type": "string"
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 32
+              },
+              "maxItems": 24
+            },
+            "expected_version": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 1
+            },
+            "overwrite_external_change": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "target",
+            "body"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "local-write"
+      },
+      {
+        "name": "rename",
+        "description": "Rename a note file",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "string",
+              "minLength": 1
+            },
+            "path": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "target",
+            "path"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "local-write"
+      },
+      {
+        "name": "delete",
+        "description": "Delete a note",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "target": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "required": [
+            "target"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "destructive"
+      },
+      {
+        "name": "search",
+        "description": "Search note titles, bodies, and tags",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "query"
+          ],
+          "additionalProperties": false
+        },
+        "effect": "read-only"
+      }
+    ],
+    "surfaces": [
+      {
+        "name": "notes",
+        "kind": "panel",
+        "title": "Notes",
+        "description": "Write and organize local Markdown notes.",
+        "intents": [
+          {
+            "provider": "com.ma-zierl.notes",
+            "capability": "create"
+          },
+          {
+            "provider": "com.ma-zierl.notes",
+            "capability": "list_tree"
+          },
+          {
+            "provider": "com.ma-zierl.notes",
+            "capability": "read"
+          },
+          {
+            "provider": "com.ma-zierl.notes",
+            "capability": "write"
+          },
+          {
+            "provider": "com.ma-zierl.notes",
+            "capability": "rename"
+          },
+          {
+            "provider": "com.ma-zierl.notes",
+            "capability": "delete"
+          },
+          {
+            "provider": "com.ma-zierl.notes",
+            "capability": "search"
+          }
+        ],
+        "ui": {
+          "entry": "ui/index.html"
+        }
+      }
+    ],
+    "grant_requests": [
+      {
+        "scope": {
+          "kind": "exact-capability",
+          "provider": "com.ma-zierl.notes",
+          "capability": "create"
+        },
+        "condition": "notify",
+        "reason": "Create notes from the Notes editor.",
+        "duration": {
+          "kind": "non-expiring"
+        }
+      },
+      {
+        "scope": {
+          "kind": "exact-capability",
+          "provider": "com.ma-zierl.notes",
+          "capability": "list_tree"
+        },
+        "condition": "silent",
+        "reason": "List notes to render the Notes workspace.",
+        "duration": {
+          "kind": "non-expiring"
+        }
+      },
+      {
+        "scope": {
+          "kind": "exact-capability",
+          "provider": "com.ma-zierl.notes",
+          "capability": "read"
+        },
+        "condition": "silent",
+        "reason": "Read a selected note.",
+        "duration": {
+          "kind": "non-expiring"
+        }
+      },
+      {
+        "scope": {
+          "kind": "exact-capability",
+          "provider": "com.ma-zierl.notes",
+          "capability": "write"
+        },
+        "condition": "notify",
+        "reason": "Save edits made in the Notes editor.",
+        "duration": {
+          "kind": "non-expiring"
+        }
+      },
+      {
+        "scope": {
+          "kind": "exact-capability",
+          "provider": "com.ma-zierl.notes",
+          "capability": "rename"
+        },
+        "condition": "notify",
+        "reason": "Rename note files.",
+        "duration": {
+          "kind": "non-expiring"
+        }
+      },
+      {
+        "scope": {
+          "kind": "exact-capability",
+          "provider": "com.ma-zierl.notes",
+          "capability": "delete"
+        },
+        "condition": "requires-approval",
+        "reason": "Delete a note only after trusted host approval.",
+        "duration": {
+          "kind": "non-expiring"
+        }
+      },
+      {
+        "scope": {
+          "kind": "exact-capability",
+          "provider": "com.ma-zierl.notes",
+          "capability": "search"
+        },
+        "condition": "silent",
+        "reason": "Search notes in the Notes workspace.",
+        "duration": {
+          "kind": "non-expiring"
+        }
+      }
+    ]
+  },
+  "consumer_grant_requests": [
+    {
+      "holder": "chat",
+      "request": {
+        "scope": {
+          "kind": "exact-capability",
+          "provider": "com.ma-zierl.notes",
+          "capability": "list_tree"
+        },
+        "condition": "silent",
+        "reason": "Let Chat list notes when the user asks.",
+        "duration": {
+          "kind": "non-expiring"
+        }
+      }
+    },
+    {
+      "holder": "chat",
+      "request": {
+        "scope": {
+          "kind": "exact-capability",
+          "provider": "com.ma-zierl.notes",
+          "capability": "search"
+        },
+        "condition": "silent",
+        "reason": "Let Chat search notes when the user asks.",
+        "duration": {
+          "kind": "non-expiring"
+        }
+      }
+    },
+    {
+      "holder": "chat",
+      "request": {
+        "scope": {
+          "kind": "exact-capability",
+          "provider": "com.ma-zierl.notes",
+          "capability": "read"
+        },
+        "condition": "silent",
+        "reason": "Let Chat read a note selected by the user request.",
+        "duration": {
+          "kind": "non-expiring"
+        }
+      }
+    },
+    {
+      "holder": "chat",
+      "request": {
+        "scope": {
+          "kind": "exact-capability",
+          "provider": "com.ma-zierl.notes",
+          "capability": "create"
+        },
+        "condition": "notify",
+        "reason": "Let Chat create a note when the user asks it to remember something.",
+        "duration": {
+          "kind": "non-expiring"
+        }
+      }
+    },
+    {
+      "holder": "chat",
+      "request": {
+        "scope": {
+          "kind": "exact-capability",
+          "provider": "com.ma-zierl.notes",
+          "capability": "write"
+        },
+        "condition": "requires-approval",
+        "reason": "Let Chat edit a note only after approval.",
+        "duration": {
+          "kind": "non-expiring"
+        }
+      }
+    },
+    {
+      "holder": "chat",
+      "request": {
+        "scope": {
+          "kind": "exact-capability",
+          "provider": "com.ma-zierl.notes",
+          "capability": "delete"
+        },
+        "condition": "requires-approval",
+        "reason": "Let Chat delete a note only after approval.",
+        "duration": {
+          "kind": "non-expiring"
+        }
+      }
+    }
+  ],
+  "backend": {
+    "kind": "mcp-stdio",
+    "command": "node",
+    "args": [
+      "backend/server.mjs"
+    ]
+  },
+  "integrity": {
+    "algorithm": "sha256",
+    "assets": {
+      "ui/index.html": "sha256-cf2bf054bd26fa5f885186c8078c75df1bd7bae1db3c48b9e4edabae3c64bf91",
+      "backend/server.mjs": "sha256-5c4b660fd6799895add99d8cece05e505fedd1d4c6d6e47b6c694386edd9ce71"
+    }
+  }
+}
