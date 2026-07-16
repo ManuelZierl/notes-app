@@ -1,7 +1,7 @@
 # Notes
 
-Standalone Notes app for the AI App Host. It is an ordinary installable app,
-not part of the trusted host or its bundled startup set.
+Standalone Notes app for Kestral (the AI App Host). It is an ordinary
+installable app, not part of the trusted host or its bundled startup set.
 
 ## Build
 

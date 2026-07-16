@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Standalone Notes app for the AI App Host.",
+  "description": "Standalone Notes app for Kestral.",
   "scripts": {
     "build": "node build.mjs",
     "check": "tsc --noEmit",
