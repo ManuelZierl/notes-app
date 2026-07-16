@@ -405,7 +405,7 @@
   "integrity": {
     "algorithm": "sha256",
     "assets": {
-      "ui/index.html": "sha256-cf2bf054bd26fa5f885186c8078c75df1bd7bae1db3c48b9e4edabae3c64bf91",
+      "ui/index.html": "sha256-945ad49638e1ad5d9134042c039ef27ef0a61431adf1eef3cead01cae8bc945c",
       "backend/server.mjs": "sha256-5c4b660fd6799895add99d8cece05e505fedd1d4c6d6e47b6c694386edd9ce71"
     }
   }

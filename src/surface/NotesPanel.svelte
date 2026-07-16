@@ -368,17 +368,23 @@
   .dialog h2 { margin: 0; font: 700 1.2rem/1.3 ui-serif, Georgia, serif; }
   .dialog p { margin: 0.6rem 0 1rem; }
   .dialog-actions { justify-content: flex-end; }
-  @media (prefers-color-scheme: dark) {
-    :global(body), main, textarea, .dialog { background: #211e19; color: #eee7da; }
-    aside { background: #181611; border-color: #4b443a; }
-    button, .list-tools input { background: #2a261f; border-color: #5c5347; color: inherit; }
-    .new { background: #b36f3d; border-color: #b36f3d; color: #17130f; }
-    .note-list > button.active, .tags { background: #2a261f; border-color: #5c5347; }
-    header, .tags, .status { border-color: #4b443a; }
-    .tag { background: #513824; }
-    .status.failed, .danger { color: #ffc2ba; background: #462522; border-color: #81504a; }
-    .backdrop { background: #000b; }
-  }
+  :global(html[data-theme="dark"]) :global(body),
+  :global(html[data-theme="dark"]) main,
+  :global(html[data-theme="dark"]) textarea,
+  :global(html[data-theme="dark"]) .dialog { background: #211e19; color: #eee7da; }
+  :global(html[data-theme="dark"]) aside { background: #181611; border-color: #4b443a; }
+  :global(html[data-theme="dark"]) button,
+  :global(html[data-theme="dark"]) .list-tools input { background: #2a261f; border-color: #5c5347; color: inherit; }
+  :global(html[data-theme="dark"]) .new { background: #b36f3d; border-color: #b36f3d; color: #17130f; }
+  :global(html[data-theme="dark"]) .note-list > button.active,
+  :global(html[data-theme="dark"]) .tags { background: #2a261f; border-color: #5c5347; }
+  :global(html[data-theme="dark"]) header,
+  :global(html[data-theme="dark"]) .tags,
+  :global(html[data-theme="dark"]) .status { border-color: #4b443a; }
+  :global(html[data-theme="dark"]) .tag { background: #513824; }
+  :global(html[data-theme="dark"]) .status.failed,
+  :global(html[data-theme="dark"]) .danger { color: #ffc2ba; background: #462522; border-color: #81504a; }
+  :global(html[data-theme="dark"]) .backdrop { background: #000b; }
   @media (max-width: 42em) {
     main { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(32rem, 1fr); }
     aside { border-right: none; border-bottom: 1px solid #d8cfc0; }
