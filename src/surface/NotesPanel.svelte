@@ -32,6 +32,7 @@
   let tags = $state<string[]>([]);
   let tagDraft = $state("");
   let query = $state("");
+  let tagFilter = $state<string[]>([]);
   let saveState = $state<SaveState>("idle");
   let message = $state("");
   let ready = $state(false);
@@ -46,6 +47,7 @@
   let deleteCancelButton = $state<HTMLButtonElement>();
   let deleteConfirmButton = $state<HTMLButtonElement>();
   let bodyInput = $state<HTMLTextAreaElement>();
+  let bodyBackdrop = $state<HTMLDivElement>();
   let comments = $state<NoteComment[]>([]);
   let selection = $state<TextSelection | null>(null);
   let commentComposerOpen = $state(false);
@@ -55,18 +57,58 @@
   let commentTarget = $state<TextSelection | null>(null);
   let commentDraft = $state("");
   let commentsOpen = $state(false);
+  let activeCommentId = $state<string | null>(null);
   let editingCommentId = $state<string | null>(null);
   let editingCommentText = $state("");
 
+  interface BodySegment {
+    text: string;
+    commentId: string | null;
+  }
+
+  // The note body with each anchored comment range marked. Rendered as a
+  // transparent-text backdrop behind the textarea so commented passages are
+  // highlighted in place, like the old CodeMirror decorations.
+  const bodySegments = $derived.by<BodySegment[]>(() => {
+    const anchored = comments
+      .flatMap((comment) => {
+        const range = locateNoteComment(body, comment);
+        return range ? [{ id: comment.comment_id, ...range }] : [];
+      })
+      .sort((left, right) => left.from - right.from);
+    const segments: BodySegment[] = [];
+    let cursor = 0;
+    for (const range of anchored) {
+      if (range.to <= cursor) continue; // swallowed by an overlapping mark
+      const start = Math.max(range.from, cursor);
+      if (start > cursor) segments.push({ text: body.slice(cursor, start), commentId: null });
+      segments.push({ text: body.slice(start, range.to), commentId: range.id });
+      cursor = range.to;
+    }
+    if (cursor < body.length) segments.push({ text: body.slice(cursor), commentId: null });
+    return segments;
+  });
+
   const selected = $derived(notes.find((note) => note.note_id === selectedId) ?? null);
+  const allTags = $derived([...new Set(notes.flatMap((note) => note.tags))].sort());
+  // Self-healing: a filtered tag whose last note vanished stops filtering
+  // instead of silently hiding everything behind an invisible chip.
+  const activeTagFilter = $derived(tagFilter.filter((tag) => allTags.includes(tag)));
   const filtered = $derived(notes.filter((note) => {
     const term = query.trim().toLocaleLowerCase("en-US");
-    return term === "" || note.title.toLocaleLowerCase("en-US").includes(term)
-      || note.body.toLocaleLowerCase("en-US").includes(term)
-      || note.tags.some((tag) => tag.includes(term))
-      || note.comments.some((comment) => comment.text.toLocaleLowerCase("en-US").includes(term)
-        || comment.selected_text.toLocaleLowerCase("en-US").includes(term));
+    return activeTagFilter.every((tag) => note.tags.includes(tag))
+      && (term === "" || note.title.toLocaleLowerCase("en-US").includes(term)
+        || note.body.toLocaleLowerCase("en-US").includes(term)
+        || note.tags.some((tag) => tag.includes(term))
+        || note.comments.some((comment) => comment.text.toLocaleLowerCase("en-US").includes(term)
+          || comment.selected_text.toLocaleLowerCase("en-US").includes(term)));
   }));
+
+  function toggleTagFilter(tag: string): void {
+    tagFilter = activeTagFilter.includes(tag)
+      ? activeTagFilter.filter((candidate) => candidate !== tag)
+      : [...activeTagFilter, tag];
+  }
 
   function completed(outcome: any): any {
     const result = outcome?.result;
@@ -109,6 +151,7 @@
     commentTarget = null;
     commentDraft = "";
     commentsOpen = false;
+    activeCommentId = null;
     editingCommentId = null;
     editingCommentText = "";
   }
@@ -308,6 +351,7 @@
       editingCommentId = null;
       editingCommentText = "";
     }
+    if (activeCommentId === id) activeCommentId = null;
     comments = comments.filter((comment) => comment.comment_id !== id);
     edit();
   }
@@ -336,12 +380,46 @@
     const range = locateNoteComment(body, comment);
     const element = bodyInput;
     if (!range || !element) return;
+    activeCommentId = comment.comment_id;
     element.focus();
     element.setSelectionRange(range.from, range.to);
     const lineHeight = Number.parseFloat(getComputedStyle(element).lineHeight) || 24;
     const linesAbove = body.slice(0, range.from).split("\n").length - 1;
     element.scrollTop = Math.max(0, linesAbove * lineHeight - element.clientHeight / 3);
     updateSelection();
+  }
+
+  /** Open a comment's card in the comments section and scroll it into view. */
+  async function openComment(id: string): Promise<void> {
+    if (!comments.some((comment) => comment.comment_id === id)) return;
+    commentsOpen = true;
+    activeCommentId = id;
+    await tick();
+    document.getElementById(`note-comment-${id}`)?.scrollIntoView({ block: "nearest" });
+  }
+
+  /** A click (collapsed caret) inside a marked range opens that comment. */
+  function bodyClick(): void {
+    const element = bodyInput;
+    if (!element) return;
+    const caret = element.selectionStart ?? 0;
+    if (caret !== (element.selectionEnd ?? 0)) return;
+    for (const comment of comments) {
+      const range = locateNoteComment(body, comment);
+      if (range && caret >= range.from && caret <= range.to) {
+        void openComment(comment.comment_id);
+        return;
+      }
+    }
+  }
+
+  /** Keep the highlight backdrop aligned with the textarea's scroll position. */
+  function syncBackdrop(): void {
+    const element = bodyInput;
+    const backdrop = bodyBackdrop;
+    if (!element || !backdrop) return;
+    backdrop.scrollTop = element.scrollTop;
+    backdrop.scrollLeft = element.scrollLeft;
   }
 
   async function deleteNote(): Promise<void> {
@@ -407,6 +485,22 @@
     <div class="list-tools">
       <button class="new" type="button" onclick={newNote}>New note</button>
       <input bind:value={query} type="search" aria-label="Search notes" placeholder="Search notes" />
+      {#if allTags.length > 0}
+        <div class="tag-filter" role="group" aria-label="Filter notes by tag">
+          {#each allTags as tag (tag)}
+            <button
+              type="button"
+              class="filter-chip"
+              class:active={activeTagFilter.includes(tag)}
+              aria-pressed={activeTagFilter.includes(tag)}
+              onclick={() => toggleTagFilter(tag)}
+            >{tag}</button>
+          {/each}
+          {#if activeTagFilter.length > 0}
+            <button type="button" class="filter-clear" onclick={() => (tagFilter = [])}>Clear</button>
+          {/if}
+        </div>
+      {/if}
     </div>
     <button class="list-toggle" type="button" aria-expanded={listOpen} onclick={() => (listOpen = !listOpen)}>
       {listOpen ? "Hide notes" : `Notes (${filtered.length})`}
@@ -461,11 +555,6 @@
       <button type="button" disabled={!selection} aria-expanded={commentComposerOpen} onclick={() => void openCommentComposer()}>
         Add comment
       </button>
-      {#if comments.length > 0}
-        <button type="button" aria-expanded={commentsOpen} onclick={() => (commentsOpen = !commentsOpen)}>
-          {comments.length === 1 ? "1 comment" : `${comments.length} comments`}
-        </button>
-      {/if}
     </div>
 
     {#if commentComposerOpen && commentTarget}
@@ -485,54 +574,72 @@
       </section>
     {/if}
 
-    <textarea
-      class="body"
-      bind:this={bodyInput}
-      bind:value={body}
-      oninput={() => { edit(); updateSelection(); }}
-      onselect={updateSelection}
-      onmouseup={updateSelection}
-      onkeyup={updateSelection}
-      aria-label="Note body"
-      placeholder="Write in Markdown…"
-      spellcheck="true"
-    ></textarea>
+    <div class="body-wrap">
+      <!-- Transparent-text mirror of the body; only the comment marks show.
+           Sits behind the textarea so commented passages highlight in place. -->
+      <div class="body-backdrop body-text" bind:this={bodyBackdrop} aria-hidden="true">{#each bodySegments as segment, index (index)}{#if segment.commentId}<mark class:active={segment.commentId === activeCommentId}>{segment.text}</mark>{:else}{segment.text}{/if}{/each}{"\n"}</div>
+      <textarea
+        class="body body-text"
+        bind:this={bodyInput}
+        bind:value={body}
+        oninput={() => { edit(); updateSelection(); syncBackdrop(); }}
+        onselect={updateSelection}
+        onmouseup={updateSelection}
+        onkeyup={updateSelection}
+        onclick={bodyClick}
+        onscroll={syncBackdrop}
+        aria-label="Note body"
+        placeholder="Write in Markdown…"
+        spellcheck="true"
+      ></textarea>
+    </div>
 
-    {#if commentsOpen && comments.length > 0}
+    {#if comments.length > 0}
       <section class="comments" aria-label="Note comments">
-        {#each comments as comment (comment.comment_id)}
-          {@const anchored = locateNoteComment(body, comment) !== null}
-          <article class="comment-card">
-            <button
-              class="comment-quote"
-              type="button"
-              disabled={!anchored}
-              title={anchored ? "Show in note" : "The commented text has changed"}
-              onclick={() => revealComment(comment)}
-            >
-              <q>{selectionPreview(comment.selected_text)}</q>
-            </button>
-            {#if !anchored}<p class="comment-unanchored">The commented text has changed; showing the original quote.</p>{/if}
-            {#if editingCommentId === comment.comment_id}
-              <textarea
-                class="comment-edit"
-                bind:value={editingCommentText}
-                rows="2"
-                aria-label={`Edit comment on ${selectionPreview(comment.selected_text)}`}
-              ></textarea>
-              <div class="comment-actions">
-                <button type="button" class="primary" disabled={editingCommentText.trim() === ""} onclick={saveEditComment}>Save comment</button>
-                <button type="button" onclick={cancelEditComment}>Cancel</button>
-              </div>
-            {:else}
-              <p class="comment-text">{comment.text}</p>
-              <div class="comment-actions">
-                <button type="button" aria-label={`Edit comment on ${selectionPreview(comment.selected_text)}`} onclick={() => startEditComment(comment)}>Edit</button>
-                <button type="button" class="danger" aria-label={`Remove comment on ${selectionPreview(comment.selected_text)}`} onclick={() => removeComment(comment.comment_id)}>Remove</button>
-              </div>
-            {/if}
-          </article>
-        {/each}
+        <button type="button" class="comments-toggle" aria-expanded={commentsOpen} onclick={() => (commentsOpen = !commentsOpen)}>
+          <svg class="chevron" class:open={commentsOpen} viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+            <path d="m9 6 6 6-6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <strong>{comments.length === 1 ? "1 comment" : `${comments.length} comments`}</strong>
+          <span class="comments-hint">Marked text in the note is commented — click it to open the comment.</span>
+        </button>
+        {#if commentsOpen}
+          <div class="comment-list">
+            {#each comments as comment (comment.comment_id)}
+              {@const anchored = locateNoteComment(body, comment) !== null}
+              <article class="comment-card" class:active={activeCommentId === comment.comment_id} id={`note-comment-${comment.comment_id}`}>
+                <button
+                  class="comment-quote"
+                  type="button"
+                  disabled={!anchored}
+                  title={anchored ? "Show in note" : "The commented text has changed"}
+                  onclick={() => revealComment(comment)}
+                >
+                  <q>{selectionPreview(comment.selected_text)}</q>
+                </button>
+                {#if !anchored}<p class="comment-unanchored">The commented text has changed; showing the original quote.</p>{/if}
+                {#if editingCommentId === comment.comment_id}
+                  <textarea
+                    class="comment-edit"
+                    bind:value={editingCommentText}
+                    rows="2"
+                    aria-label={`Edit comment on ${selectionPreview(comment.selected_text)}`}
+                  ></textarea>
+                  <div class="comment-actions">
+                    <button type="button" class="primary" disabled={editingCommentText.trim() === ""} onclick={saveEditComment}>Save comment</button>
+                    <button type="button" onclick={cancelEditComment}>Cancel</button>
+                  </div>
+                {:else}
+                  <p class="comment-text">{comment.text}</p>
+                  <div class="comment-actions">
+                    <button type="button" aria-label={`Edit comment on ${selectionPreview(comment.selected_text)}`} onclick={() => startEditComment(comment)}>Edit</button>
+                    <button type="button" class="danger" aria-label={`Remove comment on ${selectionPreview(comment.selected_text)}`} onclick={() => removeComment(comment.comment_id)}>Remove</button>
+                  </div>
+                {/if}
+              </article>
+            {/each}
+          </div>
+        {/if}
       </section>
     {/if}
   </section>
@@ -566,6 +673,10 @@
   .list-tools { display: grid; gap: 0.55rem; padding: 0.8rem; }
   .new { background: #623b25; color: #fffaf2; border-color: #623b25; font-weight: 700; }
   .list-tools input { width: 100%; min-width: 0; border: 1px solid #c8bdad; border-radius: 0.55rem; background: #fffdf8; padding: 0.5rem 0.65rem; }
+  .tag-filter { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; }
+  .filter-chip, .filter-clear { min-height: 1.7rem; padding: 0.1rem 0.6rem; border-radius: 999px; font-size: 0.78rem; }
+  .filter-chip.active { background: #623b25; border-color: #623b25; color: #fffaf2; }
+  .filter-clear { border-color: transparent; background: transparent; color: #706558; text-decoration: underline; }
   .list-toggle { display: none; }
   .note-list { min-height: 0; overflow-y: auto; display: grid; align-content: start; gap: 0.2rem; padding: 0 0.45rem 0.7rem; }
   .note-list > button { min-width: 0; display: grid; gap: 0.1rem; text-align: left; border-color: transparent; background: transparent; padding: 0.65rem; }
@@ -589,7 +700,16 @@
   .status { min-width: 0; height: 3.25rem; overflow: auto; display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; padding: 0.4rem 1rem; color: #706558; font-size: 0.82rem; border-bottom: 1px solid #e4ddd2; }
   .status span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
   .status.failed { color: #8a2525; background: #fff2f0; }
-  .body { flex: 1; width: 100%; min-width: 0; min-height: 12rem; resize: none; overflow: auto; border: none; background: #fffdf8; color: inherit; padding: clamp(1rem, 0.7rem + 1.2vw, 2rem); font: 1rem/1.65 ui-monospace, "Cascadia Code", monospace; }
+  /* The backdrop and the textarea share one grid cell, identical typography
+     and padding, so the backdrop's comment marks sit exactly under the
+     textarea's (visible) text. */
+  .body-wrap { flex: 1; min-width: 0; min-height: 12rem; display: grid; background: #fffdf8; }
+  .body-wrap > * { grid-area: 1 / 1; }
+  .body-text { padding: clamp(1rem, 0.7rem + 1.2vw, 2rem); font: 1rem/1.65 ui-monospace, "Cascadia Code", monospace; }
+  .body-backdrop { overflow: hidden; white-space: pre-wrap; word-wrap: break-word; color: transparent; user-select: none; pointer-events: none; }
+  .body-backdrop mark { color: transparent; background: #f2e3c0; border-bottom: 2px solid #b3854f; border-radius: 2px; padding: 0; }
+  .body-backdrop mark.active { background: #ead0a0; border-bottom-color: #9d5d2e; }
+  .body { width: 100%; min-width: 0; min-height: 0; resize: none; overflow: auto; border: none; background: transparent; color: inherit; }
   .comment-bar { min-width: 0; flex-shrink: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; padding: 0.4rem 1rem; border-bottom: 1px solid #e4ddd2; background: #faf6ee; font-size: 0.82rem; }
   .selection-summary { min-width: 0; flex: 1 1 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hint { color: #706558; }
@@ -599,8 +719,14 @@
   .comment-composer textarea, .comment-edit { width: 100%; min-width: 0; resize: vertical; border: 1px solid #c8bdad; border-radius: 0.55rem; background: #fffdf8; color: inherit; padding: 0.5rem 0.65rem; }
   .comment-actions { display: flex; flex-wrap: wrap; gap: 0.45rem; }
   .primary { background: #623b25; color: #fffaf2; border-color: #623b25; font-weight: 700; }
-  .comments { flex-shrink: 0; max-height: 14rem; overflow-y: auto; display: grid; gap: 0.5rem; padding: 0.6rem 1rem; border-top: 1px solid #e4ddd2; background: #faf6ee; }
+  .comments { flex-shrink: 0; display: grid; border-top: 1px solid #e4ddd2; background: #faf6ee; }
+  .comments-toggle { min-width: 0; display: flex; align-items: center; gap: 0.5rem; border: none; border-radius: 0; background: transparent; padding: 0.55rem 1rem; text-align: left; }
+  .comments-hint { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #706558; font-size: 0.78rem; }
+  .chevron { flex-shrink: 0; transition: transform 120ms ease; }
+  .chevron.open { transform: rotate(90deg); }
+  .comment-list { max-height: 14rem; overflow-y: auto; display: grid; gap: 0.5rem; padding: 0 1rem 0.7rem; }
   .comment-card { display: grid; gap: 0.35rem; border: 1px solid #e4ddd2; border-radius: 0.55rem; background: #fffdf8; padding: 0.55rem 0.7rem; }
+  .comment-card.active { border-color: #b3854f; background: #fdf6e9; }
   .comment-quote { min-height: auto; width: fit-content; max-width: 100%; text-align: left; border: none; background: transparent; padding: 0; color: #9d5d2e; overflow-wrap: anywhere; }
   .comment-quote q { text-decoration: underline; text-underline-offset: 0.18em; }
   .comment-quote:disabled { color: #706558; }
@@ -614,7 +740,7 @@
   .dialog-actions { justify-content: flex-end; }
   :global(html[data-theme="dark"]) :global(body),
   :global(html[data-theme="dark"]) main,
-  :global(html[data-theme="dark"]) textarea,
+  :global(html[data-theme="dark"]) .body-wrap,
   :global(html[data-theme="dark"]) .dialog { background: #211e19; color: #eee7da; }
   :global(html[data-theme="dark"]) aside { background: #181611; border-color: #4b443a; }
   :global(html[data-theme="dark"]) button,
@@ -630,7 +756,15 @@
   :global(html[data-theme="dark"]) .comment-composer,
   :global(html[data-theme="dark"]) .comments { background: #2a261f; border-color: #4b443a; }
   :global(html[data-theme="dark"]) .comment-composer textarea,
-  :global(html[data-theme="dark"]) .comment-edit { border-color: #5c5347; }
+  :global(html[data-theme="dark"]) .comment-edit { background: #211e19; color: #eee7da; border-color: #5c5347; }
+  :global(html[data-theme="dark"]) .body { background: transparent; color: #eee7da; }
+  :global(html[data-theme="dark"]) .body-backdrop mark { background: #513824; border-bottom-color: #b36f3d; }
+  :global(html[data-theme="dark"]) .body-backdrop mark.active { background: #6b4526; border-bottom-color: #e0a370; }
+  :global(html[data-theme="dark"]) .comments-toggle { background: transparent; border: none; }
+  :global(html[data-theme="dark"]) .comments-hint { color: #a89d8d; }
+  :global(html[data-theme="dark"]) .comment-card.active { border-color: #b36f3d; background: #2a2018; }
+  :global(html[data-theme="dark"]) .filter-chip.active { background: #b36f3d; border-color: #b36f3d; color: #17130f; }
+  :global(html[data-theme="dark"]) .filter-clear { background: transparent; border-color: transparent; color: #a89d8d; }
   :global(html[data-theme="dark"]) .comment-card { background: #211e19; border-color: #4b443a; }
   :global(html[data-theme="dark"]) .comment-quote { background: transparent; border: none; color: #e0a370; }
   :global(html[data-theme="dark"]) .comment-quote:disabled,
