@@ -537,21 +537,18 @@
       <button class="add-tag" type="button" disabled={!tagDraft.trim()} onclick={addTag}>Add</button>
     </div>
 
-    <div class="status" class:failed={saveState === "failed"} role="status" aria-live="polite">
-      <span>{message}</span>
+    <!-- One slim utility row: save status on the left, commenting on the
+         right. Keeps the editor as tall as possible without hiding state. -->
+    <div class="utility" class:failed={saveState === "failed"}>
+      <span class="status-message" role="status" aria-live="polite">{message}</span>
       {#if saveState === "failed"}<button type="button" onclick={() => void save()}>Retry</button>{/if}
       {#if externalConflict || selected?.externally_modified}
         <button type="button" onclick={() => void loadExternalVersion()}>Load file, discard draft</button>
         <button type="button" onclick={() => void save(true)}>Overwrite with draft</button>
       {/if}
-    </div>
-
-    <div class="comment-bar">
-      {#if selection}
-        <span class="selection-summary">“{selectionPreview(selection.text)}”</span>
-      {:else}
-        <span class="selection-summary hint">Select text in the note to comment on it.</span>
-      {/if}
+      <span class="selection-summary" class:hint={!selection}>
+        {selection ? `“${selectionPreview(selection.text)}”` : "Select text to comment."}
+      </span>
       <button type="button" disabled={!selection} aria-expanded={commentComposerOpen} onclick={() => void openCommentComposer()}>
         Add comment
       </button>
@@ -686,7 +683,6 @@
   .note-list p { padding: 0 0.5rem; color: #706558; }
   /* Flex column: the comment composer and comments panel come and go. */
   .editor { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-  .status { flex-shrink: 0; }
   header { min-width: 0; flex-shrink: 0; display: flex; align-items: center; gap: 0.7rem; padding: 0.7rem 1rem; border-bottom: 1px solid #e4ddd2; }
   .title { min-width: 0; flex: 1; border: none; background: transparent; color: inherit; font: 700 clamp(1.05rem, 0.98rem + 0.35vw, 1.3rem)/1.3 ui-serif, Georgia, serif; padding: 0.35rem; }
   .actions, .dialog-actions { display: flex; flex-wrap: wrap; gap: 0.45rem; }
@@ -697,9 +693,10 @@
   .tag button { min-width: 1.5rem; min-height: 1.5rem; border: none; border-radius: 50%; background: transparent; padding: 0; }
   .tags input { min-width: 6rem; flex: 1; border: none; background: transparent; padding: 0.35rem; }
   .add-tag { min-height: 1.8rem; padding-block: 0.2rem; }
-  .status { min-width: 0; height: 3.25rem; overflow: auto; display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; padding: 0.4rem 1rem; color: #706558; font-size: 0.82rem; border-bottom: 1px solid #e4ddd2; }
-  .status span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
-  .status.failed { color: #8a2525; background: #fff2f0; }
+  .utility { min-width: 0; flex-shrink: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; padding: 0.3rem 1rem; min-height: 2.5rem; color: #706558; font-size: 0.82rem; border-bottom: 1px solid #e4ddd2; background: #faf6ee; }
+  .status-message { min-width: 0; flex: 1 1 10rem; overflow-wrap: anywhere; }
+  .utility.failed { color: #8a2525; background: #fff2f0; }
+  .utility button { min-height: 1.8rem; padding-block: 0.2rem; }
   /* The backdrop and the textarea share one grid cell, identical typography
      and padding, so the backdrop's comment marks sit exactly under the
      textarea's (visible) text. */
@@ -710,10 +707,8 @@
   .body-backdrop mark { color: transparent; background: #f2e3c0; border-bottom: 2px solid #b3854f; border-radius: 2px; padding: 0; }
   .body-backdrop mark.active { background: #ead0a0; border-bottom-color: #9d5d2e; }
   .body { width: 100%; min-width: 0; min-height: 0; resize: none; overflow: auto; border: none; background: transparent; color: inherit; }
-  .comment-bar { min-width: 0; flex-shrink: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; padding: 0.4rem 1rem; border-bottom: 1px solid #e4ddd2; background: #faf6ee; font-size: 0.82rem; }
-  .selection-summary { min-width: 0; flex: 1 1 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .selection-summary { min-width: 0; flex: 0 1 auto; max-width: min(50%, 22rem); margin-left: auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .hint { color: #706558; }
-  .comment-bar button { min-height: 1.8rem; padding-block: 0.2rem; }
   .comment-composer { flex-shrink: 0; display: grid; gap: 0.45rem; padding: 0.6rem 1rem; border-bottom: 1px solid #e4ddd2; background: #faf6ee; }
   .comment-composer label { font-size: 0.82rem; font-weight: 700; color: #706558; overflow-wrap: anywhere; }
   .comment-composer textarea, .comment-edit { width: 100%; min-width: 0; resize: vertical; border: 1px solid #c8bdad; border-radius: 0.55rem; background: #fffdf8; color: inherit; padding: 0.5rem 0.65rem; }
@@ -750,9 +745,8 @@
   :global(html[data-theme="dark"]) .note-list > button.active,
   :global(html[data-theme="dark"]) .tags { background: #2a261f; border-color: #5c5347; }
   :global(html[data-theme="dark"]) header,
-  :global(html[data-theme="dark"]) .tags,
-  :global(html[data-theme="dark"]) .status { border-color: #4b443a; }
-  :global(html[data-theme="dark"]) .comment-bar,
+  :global(html[data-theme="dark"]) .tags { border-color: #4b443a; }
+  :global(html[data-theme="dark"]) .utility,
   :global(html[data-theme="dark"]) .comment-composer,
   :global(html[data-theme="dark"]) .comments { background: #2a261f; border-color: #4b443a; }
   :global(html[data-theme="dark"]) .comment-composer textarea,
@@ -772,7 +766,7 @@
   :global(html[data-theme="dark"]) .comment-unanchored,
   :global(html[data-theme="dark"]) .comment-composer label { color: #a89d8d; }
   :global(html[data-theme="dark"]) .tag { background: #513824; }
-  :global(html[data-theme="dark"]) .status.failed,
+  :global(html[data-theme="dark"]) .utility.failed,
   :global(html[data-theme="dark"]) .danger { color: #ffc2ba; background: #462522; border-color: #81504a; }
   :global(html[data-theme="dark"]) .backdrop { background: #000b; }
   @media (max-width: 42em) {
