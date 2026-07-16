@@ -20,6 +20,13 @@ The backend stores Markdown files and `.meta.json` sidecars below the managed
 `APP_HOST_DATA_DIR` supplied by the host. Missing `tags` in older sidecars are
 treated as an empty list and written in the current format on the next save.
 
+Comments attach to a selected passage of a note. Each comment stores the
+quoted text, its offsets, and 180 characters of surrounding context, so it
+re-anchors after edits; an ambiguous anchor (repeated quote, stale context)
+shows the original quote instead of guessing. Writing comments requires
+`expected_version`, and sidecar comment entries that predate this format are
+preserved on disk but not shown.
+
 The former bundled Notes workspace is deliberately not moved automatically.
 Copy the contents of the old `notes-workspace` directory into this app's
 managed data directory only while the app is stopped. This preserves the

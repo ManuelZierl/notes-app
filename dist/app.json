@@ -1,9 +1,9 @@
 {
   "format_version": 1,
   "id": "com.ma-zierl.notes",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "display_name": "Notes",
-  "description": "A local Markdown workspace with tags and autosave.",
+  "description": "A local Markdown workspace with tags, comments, and autosave.",
   "publisher": {
     "name": "Manuel Zierl"
   },
@@ -35,6 +35,56 @@
                 "maxLength": 32
               },
               "maxItems": 24
+            },
+            "comments": {
+              "type": "array",
+              "maxItems": 200,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "comment_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000
+                  },
+                  "selected_text": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "selection_start": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "selection_end": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "context_before": {
+                    "type": "string"
+                  },
+                  "context_after": {
+                    "type": "string"
+                  },
+                  "created_at": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "comment_id",
+                  "text",
+                  "selected_text",
+                  "selection_start",
+                  "selection_end",
+                  "context_before",
+                  "context_after",
+                  "created_at"
+                ],
+                "additionalProperties": false
+              }
             }
           },
           "required": [
@@ -96,6 +146,56 @@
                 "maxLength": 32
               },
               "maxItems": 24
+            },
+            "comments": {
+              "type": "array",
+              "maxItems": 200,
+              "items": {
+                "type": "object",
+                "properties": {
+                  "comment_id": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4000
+                  },
+                  "selected_text": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "selection_start": {
+                    "type": "integer",
+                    "minimum": 0
+                  },
+                  "selection_end": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "context_before": {
+                    "type": "string"
+                  },
+                  "context_after": {
+                    "type": "string"
+                  },
+                  "created_at": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "comment_id",
+                  "text",
+                  "selected_text",
+                  "selection_start",
+                  "selection_end",
+                  "context_before",
+                  "context_after",
+                  "created_at"
+                ],
+                "additionalProperties": false
+              }
             },
             "expected_version": {
               "type": [
@@ -159,7 +259,7 @@
       },
       {
         "name": "search",
-        "description": "Search note titles, bodies, and tags",
+        "description": "Search note titles, bodies, tags, and comments",
         "input_schema": {
           "type": "object",
           "properties": {
@@ -405,8 +505,8 @@
   "integrity": {
     "algorithm": "sha256",
     "assets": {
-      "ui/index.html": "sha256-945ad49638e1ad5d9134042c039ef27ef0a61431adf1eef3cead01cae8bc945c",
-      "backend/server.mjs": "sha256-5c4b660fd6799895add99d8cece05e505fedd1d4c6d6e47b6c694386edd9ce71"
+      "ui/index.html": "sha256-24c06e44304e59fd7723d3659dd16c9b921f76e5e84e7b5cc022e1ee293f582a",
+      "backend/server.mjs": "sha256-2b6b92cf297cdadfaac44d0ed493446ba86e5d885af23253815d0f1f26f420dc"
     }
   }
 }

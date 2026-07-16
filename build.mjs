@@ -37,6 +37,25 @@ const targetSchema = {
   additionalProperties: false,
 };
 const tagSchema = { type: "array", items: { type: "string", minLength: 1, maxLength: 32 }, maxItems: 24 };
+const commentsSchema = {
+  type: "array",
+  maxItems: 200,
+  items: {
+    type: "object",
+    properties: {
+      comment_id: { type: "string", minLength: 1 },
+      text: { type: "string", minLength: 1, maxLength: 4000 },
+      selected_text: { type: "string", minLength: 1 },
+      selection_start: { type: "integer", minimum: 0 },
+      selection_end: { type: "integer", minimum: 1 },
+      context_before: { type: "string" },
+      context_after: { type: "string" },
+      created_at: { type: "string" },
+    },
+    required: ["comment_id", "text", "selected_text", "selection_start", "selection_end", "context_before", "context_after", "created_at"],
+    additionalProperties: false,
+  },
+};
 
 function grant(holder, capabilityName, condition, reason) {
   return {
@@ -52,7 +71,7 @@ function manifest(indexHtml, backend) {
   const capabilities = [
     capability("create", "Create a Markdown note", {
       type: "object",
-      properties: { path: { type: "string", minLength: 1 }, title: { type: "string" }, body: { type: "string" }, tags: tagSchema },
+      properties: { path: { type: "string", minLength: 1 }, title: { type: "string" }, body: { type: "string" }, tags: tagSchema, comments: commentsSchema },
       required: ["body"],
       additionalProperties: false,
     }, "local-write"),
@@ -61,7 +80,7 @@ function manifest(indexHtml, backend) {
     capability("write", "Write a Markdown note", {
       type: "object",
       properties: {
-        target: { type: "string", minLength: 1 }, title: { type: "string" }, body: { type: "string" }, tags: tagSchema,
+        target: { type: "string", minLength: 1 }, title: { type: "string" }, body: { type: "string" }, tags: tagSchema, comments: commentsSchema,
         expected_version: { type: ["integer", "null"], minimum: 1 }, overwrite_external_change: { type: "boolean" },
       },
       required: ["target", "body"],
@@ -74,7 +93,7 @@ function manifest(indexHtml, backend) {
       additionalProperties: false,
     }, "local-write"),
     capability("delete", "Delete a note", targetSchema, "destructive"),
-    capability("search", "Search note titles, bodies, and tags", {
+    capability("search", "Search note titles, bodies, tags, and comments", {
       type: "object",
       properties: { query: { type: "string" } },
       required: ["query"],
@@ -93,9 +112,9 @@ function manifest(indexHtml, backend) {
   return {
     format_version: 1,
     id: "com.ma-zierl.notes",
-    version: "0.1.0",
+    version: "0.2.0",
     display_name: "Notes",
-    description: "A local Markdown workspace with tags and autosave.",
+    description: "A local Markdown workspace with tags, comments, and autosave.",
     publisher: { name: "Manuel Zierl" },
     license: "MIT",
     min_host_version: "0.1.0",

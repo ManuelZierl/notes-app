@@ -1,5 +1,6 @@
 <script lang="ts">
   import { tick } from "svelte";
+  import { locateNoteComment, type NoteComment } from "./noteComments";
 
   interface Note {
     note_id: string;
@@ -7,10 +8,17 @@
     title: string;
     body: string;
     tags: string[];
+    comments: NoteComment[];
     version: number;
     created_at: string;
     updated_at: string;
     externally_modified: boolean;
+  }
+
+  interface TextSelection {
+    from: number;
+    to: number;
+    text: string;
   }
 
   type SaveState = "idle" | "dirty" | "saving" | "saved" | "failed";
@@ -37,13 +45,27 @@
   let deleteButton = $state<HTMLButtonElement>();
   let deleteCancelButton = $state<HTMLButtonElement>();
   let deleteConfirmButton = $state<HTMLButtonElement>();
+  let bodyInput = $state<HTMLTextAreaElement>();
+  let comments = $state<NoteComment[]>([]);
+  let selection = $state<TextSelection | null>(null);
+  let commentComposerOpen = $state(false);
+  let commentComposerInput = $state<HTMLTextAreaElement>();
+  // Snapshot of the selection the composer was opened for, so typing the
+  // comment cannot silently retarget it.
+  let commentTarget = $state<TextSelection | null>(null);
+  let commentDraft = $state("");
+  let commentsOpen = $state(false);
+  let editingCommentId = $state<string | null>(null);
+  let editingCommentText = $state("");
 
   const selected = $derived(notes.find((note) => note.note_id === selectedId) ?? null);
   const filtered = $derived(notes.filter((note) => {
     const term = query.trim().toLocaleLowerCase("en-US");
     return term === "" || note.title.toLocaleLowerCase("en-US").includes(term)
       || note.body.toLocaleLowerCase("en-US").includes(term)
-      || note.tags.some((tag) => tag.includes(term));
+      || note.tags.some((tag) => tag.includes(term))
+      || note.comments.some((comment) => comment.text.toLocaleLowerCase("en-US").includes(term)
+        || comment.selected_text.toLocaleLowerCase("en-US").includes(term));
   }));
 
   function completed(outcome: any): any {
@@ -59,7 +81,9 @@
 
   async function refresh(preferId = selectedId): Promise<void> {
     const result = await invoke("list_tree", {});
-    notes = Array.isArray(result?.notes) ? result.notes : [];
+    // Tolerate notes from a pre-comments backend still running.
+    notes = (Array.isArray(result?.notes) ? (result.notes as Note[]) : [])
+      .map((note) => ({ ...note, comments: Array.isArray(note.comments) ? note.comments : [] }));
     if (preferId && notes.some((note) => note.note_id === preferId)) selectedId = preferId;
   }
 
@@ -79,6 +103,16 @@
     resetNewNote();
   }
 
+  function resetCommentUi(): void {
+    selection = null;
+    commentComposerOpen = false;
+    commentTarget = null;
+    commentDraft = "";
+    commentsOpen = false;
+    editingCommentId = null;
+    editingCommentText = "";
+  }
+
   function resetNewNote(): void {
     if (saveTimer) clearTimeout(saveTimer);
     selectedId = null;
@@ -87,6 +121,8 @@
     body = "";
     tags = [];
     tagDraft = "";
+    comments = [];
+    resetCommentUi();
     saveState = "idle";
     externalConflict = false;
     message = "New note";
@@ -105,6 +141,8 @@
     body = note.body;
     tags = [...note.tags];
     tagDraft = "";
+    comments = [...(note.comments ?? [])];
+    resetCommentUi();
     saveState = "idle";
     externalConflict = note.externally_modified;
     message = note.externally_modified ? "Changed outside Notes" : "Up to date";
@@ -117,7 +155,7 @@
     saveTimer = null;
     saveInFlight = true;
     const submittedRevision = revision;
-    const submitted = { title, body, tags: [...tags] };
+    const submitted = { title, body, tags: [...tags], comments: comments.map((comment) => ({ ...comment })) };
     saveState = "saving";
     message = "Saving";
     try {
@@ -127,6 +165,7 @@
             body: submitted.body,
             title: submitted.title,
             tags: submitted.tags,
+            comments: submitted.comments,
             expected_version: savedVersion,
             overwrite_external_change: overwrite,
           })
@@ -201,6 +240,108 @@
       event.preventDefault();
       addTag();
     }
+  }
+
+  function updateSelection(): void {
+    const element = bodyInput;
+    if (!element) return;
+    const from = element.selectionStart ?? 0;
+    const to = element.selectionEnd ?? 0;
+    selection = from < to ? { from, to, text: body.slice(from, to) } : null;
+  }
+
+  function contextAround(from: number, to: number): { before: string; after: string } {
+    return {
+      before: body.slice(Math.max(0, from - 180), from),
+      after: body.slice(to, Math.min(body.length, to + 180)),
+    };
+  }
+
+  function selectionPreview(text: string): string {
+    const oneLine = text.replace(/\s+/g, " ").trim();
+    return oneLine.length > 80 ? `${oneLine.slice(0, 77)}...` : oneLine;
+  }
+
+  function commentId(): string {
+    // A sandboxed (opaque-origin) frame may lack crypto.randomUUID.
+    return typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? `comment-${crypto.randomUUID()}`
+      : `comment-${Date.now()}-${Math.floor(Math.random() * 1_000_000_000)}`;
+  }
+
+  async function openCommentComposer(): Promise<void> {
+    if (!selection) return;
+    commentTarget = selection;
+    commentDraft = "";
+    commentComposerOpen = true;
+    await tick();
+    commentComposerInput?.focus();
+  }
+
+  function closeCommentComposer(): void {
+    commentComposerOpen = false;
+    commentTarget = null;
+    commentDraft = "";
+  }
+
+  function addComment(): void {
+    const text = commentDraft.trim();
+    if (!commentTarget || text === "") return;
+    const context = contextAround(commentTarget.from, commentTarget.to);
+    comments = [...comments, {
+      comment_id: commentId(),
+      text,
+      selected_text: commentTarget.text,
+      selection_start: commentTarget.from,
+      selection_end: commentTarget.to,
+      context_before: context.before,
+      context_after: context.after,
+      created_at: new Date().toISOString(),
+    }];
+    closeCommentComposer();
+    commentsOpen = true;
+    edit();
+  }
+
+  function removeComment(id: string): void {
+    if (editingCommentId === id) {
+      editingCommentId = null;
+      editingCommentText = "";
+    }
+    comments = comments.filter((comment) => comment.comment_id !== id);
+    edit();
+  }
+
+  function startEditComment(comment: NoteComment): void {
+    editingCommentId = comment.comment_id;
+    editingCommentText = comment.text;
+  }
+
+  function cancelEditComment(): void {
+    editingCommentId = null;
+    editingCommentText = "";
+  }
+
+  function saveEditComment(): void {
+    const text = editingCommentText.trim();
+    if (editingCommentId === null || text === "") return;
+    const editedId = editingCommentId;
+    comments = comments.map((comment) => (comment.comment_id === editedId ? { ...comment, text } : comment));
+    cancelEditComment();
+    edit();
+  }
+
+  /** Select the commented passage in the note body and scroll near it. */
+  function revealComment(comment: NoteComment): void {
+    const range = locateNoteComment(body, comment);
+    const element = bodyInput;
+    if (!range || !element) return;
+    element.focus();
+    element.setSelectionRange(range.from, range.to);
+    const lineHeight = Number.parseFloat(getComputedStyle(element).lineHeight) || 24;
+    const linesAbove = body.slice(0, range.from).split("\n").length - 1;
+    element.scrollTop = Math.max(0, linesAbove * lineHeight - element.clientHeight / 3);
+    updateSelection();
   }
 
   async function deleteNote(): Promise<void> {
@@ -311,7 +452,89 @@
       {/if}
     </div>
 
-    <textarea bind:value={body} oninput={edit} aria-label="Note body" placeholder="Write in Markdown…" spellcheck="true"></textarea>
+    <div class="comment-bar">
+      {#if selection}
+        <span class="selection-summary">“{selectionPreview(selection.text)}”</span>
+      {:else}
+        <span class="selection-summary hint">Select text in the note to comment on it.</span>
+      {/if}
+      <button type="button" disabled={!selection} aria-expanded={commentComposerOpen} onclick={() => void openCommentComposer()}>
+        Add comment
+      </button>
+      {#if comments.length > 0}
+        <button type="button" aria-expanded={commentsOpen} onclick={() => (commentsOpen = !commentsOpen)}>
+          {comments.length === 1 ? "1 comment" : `${comments.length} comments`}
+        </button>
+      {/if}
+    </div>
+
+    {#if commentComposerOpen && commentTarget}
+      <section class="comment-composer" aria-label="Add comment to selection">
+        <label for="selection-comment">Comment on “{selectionPreview(commentTarget.text)}”</label>
+        <textarea
+          id="selection-comment"
+          bind:this={commentComposerInput}
+          bind:value={commentDraft}
+          rows="3"
+          placeholder="Write your comment"
+        ></textarea>
+        <div class="comment-actions">
+          <button type="button" class="primary" disabled={commentDraft.trim() === ""} onclick={addComment}>Add comment</button>
+          <button type="button" onclick={closeCommentComposer}>Cancel</button>
+        </div>
+      </section>
+    {/if}
+
+    <textarea
+      class="body"
+      bind:this={bodyInput}
+      bind:value={body}
+      oninput={() => { edit(); updateSelection(); }}
+      onselect={updateSelection}
+      onmouseup={updateSelection}
+      onkeyup={updateSelection}
+      aria-label="Note body"
+      placeholder="Write in Markdown…"
+      spellcheck="true"
+    ></textarea>
+
+    {#if commentsOpen && comments.length > 0}
+      <section class="comments" aria-label="Note comments">
+        {#each comments as comment (comment.comment_id)}
+          {@const anchored = locateNoteComment(body, comment) !== null}
+          <article class="comment-card">
+            <button
+              class="comment-quote"
+              type="button"
+              disabled={!anchored}
+              title={anchored ? "Show in note" : "The commented text has changed"}
+              onclick={() => revealComment(comment)}
+            >
+              <q>{selectionPreview(comment.selected_text)}</q>
+            </button>
+            {#if !anchored}<p class="comment-unanchored">The commented text has changed; showing the original quote.</p>{/if}
+            {#if editingCommentId === comment.comment_id}
+              <textarea
+                class="comment-edit"
+                bind:value={editingCommentText}
+                rows="2"
+                aria-label={`Edit comment on ${selectionPreview(comment.selected_text)}`}
+              ></textarea>
+              <div class="comment-actions">
+                <button type="button" class="primary" disabled={editingCommentText.trim() === ""} onclick={saveEditComment}>Save comment</button>
+                <button type="button" onclick={cancelEditComment}>Cancel</button>
+              </div>
+            {:else}
+              <p class="comment-text">{comment.text}</p>
+              <div class="comment-actions">
+                <button type="button" aria-label={`Edit comment on ${selectionPreview(comment.selected_text)}`} onclick={() => startEditComment(comment)}>Edit</button>
+                <button type="button" class="danger" aria-label={`Remove comment on ${selectionPreview(comment.selected_text)}`} onclick={() => removeComment(comment.comment_id)}>Remove</button>
+              </div>
+            {/if}
+          </article>
+        {/each}
+      </section>
+    {/if}
   </section>
 
   {#if confirmDelete}
@@ -336,7 +559,9 @@
   button { min-height: 2rem; border: 1px solid #b8ad9c; border-radius: 0.55rem; background: #fffdf8; color: inherit; padding: 0.35rem 0.7rem; cursor: pointer; }
   button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 3px solid #9d5d2e; outline-offset: 2px; }
   button:disabled { opacity: 0.55; cursor: default; }
-  main { min-height: min(76dvh, 54rem); display: grid; grid-template-columns: minmax(13rem, 18rem) minmax(0, 1fr); background: #fffdf8; }
+  /* The host renders this surface full-height (fill mode); own the whole
+     frame and let the note list, body, and comments scroll internally. */
+  main { height: 100vh; height: 100dvh; min-height: min(76dvh, 54rem); display: grid; grid-template-columns: minmax(13rem, 18rem) minmax(0, 1fr); background: #fffdf8; }
   aside { min-width: 0; border-right: 1px solid #d8cfc0; background: #eee7da; display: flex; flex-direction: column; }
   .list-tools { display: grid; gap: 0.55rem; padding: 0.8rem; }
   .new { background: #623b25; color: #fffaf2; border-color: #623b25; font-weight: 700; }
@@ -348,12 +573,14 @@
   .note-list strong, .note-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .note-list small { color: #706558; }
   .note-list p { padding: 0 0.5rem; color: #706558; }
-  .editor { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto auto 3.25rem minmax(18rem, 1fr); }
-  header { min-width: 0; display: flex; align-items: center; gap: 0.7rem; padding: 0.7rem 1rem; border-bottom: 1px solid #e4ddd2; }
+  /* Flex column: the comment composer and comments panel come and go. */
+  .editor { min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+  .status { flex-shrink: 0; }
+  header { min-width: 0; flex-shrink: 0; display: flex; align-items: center; gap: 0.7rem; padding: 0.7rem 1rem; border-bottom: 1px solid #e4ddd2; }
   .title { min-width: 0; flex: 1; border: none; background: transparent; color: inherit; font: 700 clamp(1.05rem, 0.98rem + 0.35vw, 1.3rem)/1.3 ui-serif, Georgia, serif; padding: 0.35rem; }
   .actions, .dialog-actions { display: flex; flex-wrap: wrap; gap: 0.45rem; }
   .danger { color: #8a2525; border-color: #d9a4a0; background: #fff2f0; }
-  .tags { min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 0.35rem; padding: 0.5rem 1rem; border-bottom: 1px solid #e4ddd2; background: #faf6ee; }
+  .tags { min-width: 0; flex-shrink: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 0.35rem; padding: 0.5rem 1rem; border-bottom: 1px solid #e4ddd2; background: #faf6ee; }
   .tag-label { color: #706558; font-size: 0.8rem; font-weight: 700; }
   .tag { display: inline-flex; align-items: center; gap: 0.2rem; border-radius: 999px; background: #ead8c6; padding: 0.15rem 0.25rem 0.15rem 0.55rem; font-size: 0.8rem; }
   .tag button { min-width: 1.5rem; min-height: 1.5rem; border: none; border-radius: 50%; background: transparent; padding: 0; }
@@ -362,7 +589,24 @@
   .status { min-width: 0; height: 3.25rem; overflow: auto; display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; padding: 0.4rem 1rem; color: #706558; font-size: 0.82rem; border-bottom: 1px solid #e4ddd2; }
   .status span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
   .status.failed { color: #8a2525; background: #fff2f0; }
-  textarea { width: 100%; min-width: 0; min-height: 0; resize: none; overflow: auto; border: none; background: #fffdf8; color: inherit; padding: clamp(1rem, 0.7rem + 1.2vw, 2rem); font: 1rem/1.65 ui-monospace, "Cascadia Code", monospace; }
+  .body { flex: 1; width: 100%; min-width: 0; min-height: 12rem; resize: none; overflow: auto; border: none; background: #fffdf8; color: inherit; padding: clamp(1rem, 0.7rem + 1.2vw, 2rem); font: 1rem/1.65 ui-monospace, "Cascadia Code", monospace; }
+  .comment-bar { min-width: 0; flex-shrink: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; padding: 0.4rem 1rem; border-bottom: 1px solid #e4ddd2; background: #faf6ee; font-size: 0.82rem; }
+  .selection-summary { min-width: 0; flex: 1 1 10rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .hint { color: #706558; }
+  .comment-bar button { min-height: 1.8rem; padding-block: 0.2rem; }
+  .comment-composer { flex-shrink: 0; display: grid; gap: 0.45rem; padding: 0.6rem 1rem; border-bottom: 1px solid #e4ddd2; background: #faf6ee; }
+  .comment-composer label { font-size: 0.82rem; font-weight: 700; color: #706558; overflow-wrap: anywhere; }
+  .comment-composer textarea, .comment-edit { width: 100%; min-width: 0; resize: vertical; border: 1px solid #c8bdad; border-radius: 0.55rem; background: #fffdf8; color: inherit; padding: 0.5rem 0.65rem; }
+  .comment-actions { display: flex; flex-wrap: wrap; gap: 0.45rem; }
+  .primary { background: #623b25; color: #fffaf2; border-color: #623b25; font-weight: 700; }
+  .comments { flex-shrink: 0; max-height: 14rem; overflow-y: auto; display: grid; gap: 0.5rem; padding: 0.6rem 1rem; border-top: 1px solid #e4ddd2; background: #faf6ee; }
+  .comment-card { display: grid; gap: 0.35rem; border: 1px solid #e4ddd2; border-radius: 0.55rem; background: #fffdf8; padding: 0.55rem 0.7rem; }
+  .comment-quote { min-height: auto; width: fit-content; max-width: 100%; text-align: left; border: none; background: transparent; padding: 0; color: #9d5d2e; overflow-wrap: anywhere; }
+  .comment-quote q { text-decoration: underline; text-underline-offset: 0.18em; }
+  .comment-quote:disabled { color: #706558; }
+  .comment-quote:disabled q { text-decoration: none; }
+  .comment-text { margin: 0; overflow-wrap: anywhere; }
+  .comment-unanchored { margin: 0; font-size: 0.78rem; color: #706558; }
   .backdrop { position: fixed; inset: 0; z-index: 10; display: grid; place-items: center; padding: 1rem; background: #27231dcc; }
   .dialog { width: min(100%, 28rem); border-radius: 0.85rem; background: #fffdf8; padding: 1.2rem; box-shadow: 0 1rem 3rem #27231d55; }
   .dialog h2 { margin: 0; font: 700 1.2rem/1.3 ui-serif, Georgia, serif; }
@@ -375,12 +619,24 @@
   :global(html[data-theme="dark"]) aside { background: #181611; border-color: #4b443a; }
   :global(html[data-theme="dark"]) button,
   :global(html[data-theme="dark"]) .list-tools input { background: #2a261f; border-color: #5c5347; color: inherit; }
-  :global(html[data-theme="dark"]) .new { background: #b36f3d; border-color: #b36f3d; color: #17130f; }
+  :global(html[data-theme="dark"]) .new,
+  :global(html[data-theme="dark"]) .primary { background: #b36f3d; border-color: #b36f3d; color: #17130f; }
   :global(html[data-theme="dark"]) .note-list > button.active,
   :global(html[data-theme="dark"]) .tags { background: #2a261f; border-color: #5c5347; }
   :global(html[data-theme="dark"]) header,
   :global(html[data-theme="dark"]) .tags,
   :global(html[data-theme="dark"]) .status { border-color: #4b443a; }
+  :global(html[data-theme="dark"]) .comment-bar,
+  :global(html[data-theme="dark"]) .comment-composer,
+  :global(html[data-theme="dark"]) .comments { background: #2a261f; border-color: #4b443a; }
+  :global(html[data-theme="dark"]) .comment-composer textarea,
+  :global(html[data-theme="dark"]) .comment-edit { border-color: #5c5347; }
+  :global(html[data-theme="dark"]) .comment-card { background: #211e19; border-color: #4b443a; }
+  :global(html[data-theme="dark"]) .comment-quote { background: transparent; border: none; color: #e0a370; }
+  :global(html[data-theme="dark"]) .comment-quote:disabled,
+  :global(html[data-theme="dark"]) .hint,
+  :global(html[data-theme="dark"]) .comment-unanchored,
+  :global(html[data-theme="dark"]) .comment-composer label { color: #a89d8d; }
   :global(html[data-theme="dark"]) .tag { background: #513824; }
   :global(html[data-theme="dark"]) .status.failed,
   :global(html[data-theme="dark"]) .danger { color: #ffc2ba; background: #462522; border-color: #81504a; }

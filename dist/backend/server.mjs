@@ -13,7 +13,7 @@ import {
 } from "node:fs";
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 var APP_ID = "com.ma-zierl.notes";
-var SERVER_INFO = { name: APP_ID, version: "0.1.0" };
+var SERVER_INFO = { name: APP_ID, version: "0.2.0" };
 var PROTOCOL_VERSION = "2025-06-18";
 var dataDirectory = process.env.APP_HOST_DATA_DIR;
 if (!dataDirectory) throw new Error("APP_HOST_DATA_DIR is required");
@@ -27,6 +27,25 @@ var targetSchema = {
   required: ["target"],
   additionalProperties: false
 };
+var commentsSchema = {
+  type: "array",
+  maxItems: 200,
+  items: {
+    type: "object",
+    properties: {
+      comment_id: { type: "string", minLength: 1 },
+      text: { type: "string", minLength: 1, maxLength: 4e3 },
+      selected_text: { type: "string", minLength: 1 },
+      selection_start: { type: "integer", minimum: 0 },
+      selection_end: { type: "integer", minimum: 1 },
+      context_before: { type: "string" },
+      context_after: { type: "string" },
+      created_at: { type: "string" }
+    },
+    required: ["comment_id", "text", "selected_text", "selection_start", "selection_end", "context_before", "context_after", "created_at"],
+    additionalProperties: false
+  }
+};
 var TOOLS = [
   {
     name: "create",
@@ -37,7 +56,8 @@ var TOOLS = [
         path: { type: "string", minLength: 1 },
         title: { type: "string" },
         body: { type: "string" },
-        tags: { type: "array", items: { type: "string", minLength: 1, maxLength: 32 }, maxItems: 24 }
+        tags: { type: "array", items: { type: "string", minLength: 1, maxLength: 32 }, maxItems: 24 },
+        comments: commentsSchema
       },
       required: ["body"],
       additionalProperties: false
@@ -55,6 +75,7 @@ var TOOLS = [
         title: { type: "string" },
         body: { type: "string" },
         tags: { type: "array", items: { type: "string", minLength: 1, maxLength: 32 }, maxItems: 24 },
+        comments: commentsSchema,
         expected_version: { type: ["integer", "null"], minimum: 1 },
         overwrite_external_change: { type: "boolean" }
       },
@@ -75,7 +96,7 @@ var TOOLS = [
   { name: "delete", description: "Delete a note", inputSchema: targetSchema },
   {
     name: "search",
-    description: "Search note titles, bodies, and tags",
+    description: "Search note titles, bodies, tags, and comments",
     inputSchema: {
       type: "object",
       properties: { query: { type: "string" } },
@@ -226,6 +247,7 @@ function readNote(path) {
     title: titleFromBody(path, body, metadata.title),
     body,
     tags: metadata.tags,
+    comments: wireComments(metadata),
     version: metadata.version,
     created_at: metadata.created_at,
     updated_at: metadata.updated_at,
@@ -261,6 +283,23 @@ function normalizedTags(value) {
   if (tags.length > 24 || tags.some((tag) => tag.length > 32)) throw new Error("tags exceed the declared limits");
   return [...new Set(tags)];
 }
+function isNoteComment(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const comment = value;
+  return typeof comment.comment_id === "string" && comment.comment_id !== "" && typeof comment.text === "string" && comment.text !== "" && comment.text.length <= 4e3 && typeof comment.selected_text === "string" && comment.selected_text !== "" && Number.isInteger(comment.selection_start) && Number(comment.selection_start) >= 0 && Number.isInteger(comment.selection_end) && Number(comment.selection_end) >= 1 && typeof comment.context_before === "string" && typeof comment.context_after === "string" && typeof comment.created_at === "string";
+}
+function wireComments(metadata) {
+  return (metadata.comments ?? []).filter(isNoteComment);
+}
+function normalizedComments(value) {
+  if (value === void 0) return void 0;
+  if (!Array.isArray(value) || value.length > 200) throw new Error("comments must be an array of at most 200 entries");
+  return value.map((entry) => {
+    if (!isNoteComment(entry)) throw new Error("comments entries need comment_id, text, selected_text, selection offsets, context, and created_at");
+    const { comment_id, text, selected_text, selection_start, selection_end, context_before, context_after, created_at } = entry;
+    return { comment_id, text, selected_text, selection_start, selection_end, context_before, context_after, created_at };
+  });
+}
 function createNote(args) {
   const body = String(args.body ?? "");
   const title = String(args.title ?? "").trim();
@@ -275,7 +314,8 @@ function createNote(args) {
     created_at: now,
     updated_at: now,
     content_sha256: digest(body),
-    tags: normalizedTags(args.tags)
+    tags: normalizedTags(args.tags),
+    comments: normalizedComments(args.comments)
   };
   commitMutations([
     mutation(path, body),
@@ -287,6 +327,10 @@ function createNote(args) {
 function writeNote(args) {
   const path = resolveTarget(String(args.target ?? ""));
   const metadata = parseMetadata(path);
+  const comments = normalizedComments(args.comments);
+  if (comments !== void 0 && (args.expected_version === void 0 || args.expected_version === null)) {
+    throw new Error("expected_version is required when writing comments");
+  }
   if (args.expected_version !== void 0 && args.expected_version !== null && Number(args.expected_version) !== metadata.version) {
     throw new Error(`note version conflict: expected ${String(args.expected_version)}, current ${metadata.version}`);
   }
@@ -301,7 +345,8 @@ function writeNote(args) {
     version: metadata.version + 1,
     updated_at: (/* @__PURE__ */ new Date()).toISOString(),
     content_sha256: digest(body),
-    tags: args.tags === void 0 ? metadata.tags : normalizedTags(args.tags)
+    tags: args.tags === void 0 ? metadata.tags : normalizedTags(args.tags),
+    comments: comments ?? metadata.comments
   };
   commitMutations([
     mutation(path, body),
@@ -346,7 +391,7 @@ function callTool(name, args) {
     }
     case "search": {
       const query = String(args.query ?? "").toLocaleLowerCase("en-US");
-      const notes = listNotes().filter((note) => note.title.toLocaleLowerCase("en-US").includes(query) || note.body.toLocaleLowerCase("en-US").includes(query) || note.tags.some((tag) => tag.includes(query)));
+      const notes = listNotes().filter((note) => note.title.toLocaleLowerCase("en-US").includes(query) || note.body.toLocaleLowerCase("en-US").includes(query) || note.tags.some((tag) => tag.includes(query)) || note.comments.some((comment) => comment.text.toLocaleLowerCase("en-US").includes(query) || comment.selected_text.toLocaleLowerCase("en-US").includes(query)));
       return { query: String(args.query ?? ""), notes, total: notes.length };
     }
     default:

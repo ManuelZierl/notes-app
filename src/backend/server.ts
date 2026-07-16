@@ -13,13 +13,24 @@ import {
 import { dirname, extname, join, relative, resolve, sep } from "node:path";
 
 const APP_ID = "com.ma-zierl.notes";
-const SERVER_INFO = { name: APP_ID, version: "0.1.0" };
+const SERVER_INFO = { name: APP_ID, version: "0.2.0" };
 const PROTOCOL_VERSION = "2025-06-18";
 const dataDirectory = process.env.APP_HOST_DATA_DIR;
 if (!dataDirectory) throw new Error("APP_HOST_DATA_DIR is required");
 const ROOT = resolve(dataDirectory);
 mkdirSync(ROOT, { recursive: true });
 const TRANSACTION_FILE = ".ai-app-host-notes-transaction.json";
+
+interface NoteComment {
+  comment_id: string;
+  text: string;
+  selected_text: string;
+  selection_start: number;
+  selection_end: number;
+  context_before: string;
+  context_after: string;
+  created_at: string;
+}
 
 interface Metadata {
   note_id: string;
@@ -29,6 +40,8 @@ interface Metadata {
   updated_at: string;
   content_sha256: string;
   tags: string[];
+  // Raw sidecar entries are preserved verbatim; only entries with the full
+  // anchoring shape surface as NoteComments on the wire.
   comments?: unknown[];
   created_run_id?: string;
   updated_run_id?: string;
@@ -55,6 +68,7 @@ interface Note {
   title: string;
   body: string;
   tags: string[];
+  comments: NoteComment[];
   version: number;
   created_at: string;
   updated_at: string;
@@ -74,6 +88,25 @@ const targetSchema = {
   required: ["target"],
   additionalProperties: false,
 };
+const commentsSchema = {
+  type: "array",
+  maxItems: 200,
+  items: {
+    type: "object",
+    properties: {
+      comment_id: { type: "string", minLength: 1 },
+      text: { type: "string", minLength: 1, maxLength: 4000 },
+      selected_text: { type: "string", minLength: 1 },
+      selection_start: { type: "integer", minimum: 0 },
+      selection_end: { type: "integer", minimum: 1 },
+      context_before: { type: "string" },
+      context_after: { type: "string" },
+      created_at: { type: "string" },
+    },
+    required: ["comment_id", "text", "selected_text", "selection_start", "selection_end", "context_before", "context_after", "created_at"],
+    additionalProperties: false,
+  },
+};
 const TOOLS = [
   {
     name: "create",
@@ -85,6 +118,7 @@ const TOOLS = [
         title: { type: "string" },
         body: { type: "string" },
         tags: { type: "array", items: { type: "string", minLength: 1, maxLength: 32 }, maxItems: 24 },
+        comments: commentsSchema,
       },
       required: ["body"],
       additionalProperties: false,
@@ -102,6 +136,7 @@ const TOOLS = [
         title: { type: "string" },
         body: { type: "string" },
         tags: { type: "array", items: { type: "string", minLength: 1, maxLength: 32 }, maxItems: 24 },
+        comments: commentsSchema,
         expected_version: { type: ["integer", "null"], minimum: 1 },
         overwrite_external_change: { type: "boolean" },
       },
@@ -122,7 +157,7 @@ const TOOLS = [
   { name: "delete", description: "Delete a note", inputSchema: targetSchema },
   {
     name: "search",
-    description: "Search note titles, bodies, and tags",
+    description: "Search note titles, bodies, tags, and comments",
     inputSchema: {
       type: "object",
       properties: { query: { type: "string" } },
@@ -289,6 +324,7 @@ function readNote(path: string): Note {
     title: titleFromBody(path, body, metadata.title),
     body,
     tags: metadata.tags,
+    comments: wireComments(metadata),
     version: metadata.version,
     created_at: metadata.created_at,
     updated_at: metadata.updated_at,
@@ -329,6 +365,34 @@ function normalizedTags(value: unknown): string[] {
   return [...new Set(tags)];
 }
 
+function isNoteComment(value: unknown): value is NoteComment {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const comment = value as Record<string, unknown>;
+  return typeof comment.comment_id === "string" && comment.comment_id !== ""
+    && typeof comment.text === "string" && comment.text !== "" && comment.text.length <= 4000
+    && typeof comment.selected_text === "string" && comment.selected_text !== ""
+    && Number.isInteger(comment.selection_start) && Number(comment.selection_start) >= 0
+    && Number.isInteger(comment.selection_end) && Number(comment.selection_end) >= 1
+    && typeof comment.context_before === "string"
+    && typeof comment.context_after === "string"
+    && typeof comment.created_at === "string";
+}
+
+function wireComments(metadata: Metadata): NoteComment[] {
+  return (metadata.comments ?? []).filter(isNoteComment);
+}
+
+/** Validate an explicit comments argument; undefined means "leave unchanged". */
+function normalizedComments(value: unknown): NoteComment[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.length > 200) throw new Error("comments must be an array of at most 200 entries");
+  return value.map((entry) => {
+    if (!isNoteComment(entry)) throw new Error("comments entries need comment_id, text, selected_text, selection offsets, context, and created_at");
+    const { comment_id, text, selected_text, selection_start, selection_end, context_before, context_after, created_at } = entry;
+    return { comment_id, text, selected_text, selection_start, selection_end, context_before, context_after, created_at };
+  });
+}
+
 function createNote(args: Record<string, unknown>): Note {
   const body = String(args.body ?? "");
   const title = String(args.title ?? "").trim();
@@ -344,6 +408,7 @@ function createNote(args: Record<string, unknown>): Note {
     updated_at: now,
     content_sha256: digest(body),
     tags: normalizedTags(args.tags),
+    comments: normalizedComments(args.comments),
   };
   commitMutations([
     mutation(path, body),
@@ -355,6 +420,12 @@ function createNote(args: Record<string, unknown>): Note {
 function writeNote(args: Record<string, unknown>): Note {
   const path = resolveTarget(String(args.target ?? ""));
   const metadata = parseMetadata(path);
+  const comments = normalizedComments(args.comments);
+  // Comments quote exact body positions, so a blind overwrite could attach
+  // them to text the writer never saw; require the version handshake.
+  if (comments !== undefined && (args.expected_version === undefined || args.expected_version === null)) {
+    throw new Error("expected_version is required when writing comments");
+  }
   if (args.expected_version !== undefined && args.expected_version !== null && Number(args.expected_version) !== metadata.version) {
     throw new Error(`note version conflict: expected ${String(args.expected_version)}, current ${metadata.version}`);
   }
@@ -370,6 +441,7 @@ function writeNote(args: Record<string, unknown>): Note {
     updated_at: new Date().toISOString(),
     content_sha256: digest(body),
     tags: args.tags === undefined ? metadata.tags : normalizedTags(args.tags),
+    comments: comments ?? metadata.comments,
   };
   commitMutations([
     mutation(path, body),
@@ -413,7 +485,9 @@ function callTool(name: string, args: Record<string, unknown>): unknown {
       const query = String(args.query ?? "").toLocaleLowerCase("en-US");
       const notes = listNotes().filter((note) => note.title.toLocaleLowerCase("en-US").includes(query)
         || note.body.toLocaleLowerCase("en-US").includes(query)
-        || note.tags.some((tag) => tag.includes(query)));
+        || note.tags.some((tag) => tag.includes(query))
+        || note.comments.some((comment) => comment.text.toLocaleLowerCase("en-US").includes(query)
+          || comment.selected_text.toLocaleLowerCase("en-US").includes(query)));
       return { query: String(args.query ?? ""), notes, total: notes.length };
     }
     default: throw new Error(`unknown tool '${name}'`);

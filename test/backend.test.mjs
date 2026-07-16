@@ -120,6 +120,76 @@ test("committed legacy transaction is completed before serving requests", async 
   await assert.rejects(readFile(join(root, ".ai-app-host-notes-transaction.json"), "utf8"), /ENOENT/);
 });
 
+test("comments persist under the version handshake and are searchable", async (context) => {
+  const root = await mkdtemp(join(tmpdir(), "notes-app-comments-"));
+  context.after(async () => rm(root, { recursive: true, force: true }));
+  const server = startServer(root);
+  context.after(() => server.close());
+  await server.request("initialize", { protocolVersion: "2025-06-18" });
+
+  const created = await server.request("tools/call", {
+    name: "create",
+    arguments: { path: "commented.md", title: "Commented", body: "Alpha beta gamma" },
+  });
+  const note = created.structuredContent.note;
+  assert.deepEqual(note.comments, []);
+
+  const comment = {
+    comment_id: "comment-1",
+    text: "Check this claim",
+    selected_text: "beta",
+    selection_start: 6,
+    selection_end: 10,
+    context_before: "Alpha ",
+    context_after: " gamma",
+    created_at: "2026-07-16T00:00:00.000Z",
+  };
+
+  // Comments quote exact positions; a write carrying them must prove which
+  // version it saw.
+  await assert.rejects(
+    server.request("tools/call", {
+      name: "write",
+      arguments: { target: note.note_id, body: note.body, comments: [comment] },
+    }),
+    /expected_version is required/,
+  );
+  // Malformed comment entries are rejected, not silently stored.
+  await assert.rejects(
+    server.request("tools/call", {
+      name: "write",
+      arguments: { target: note.note_id, body: note.body, comments: [{ comment_id: "x", text: "no anchor" }], expected_version: 1 },
+    }),
+    /comments entries need/,
+  );
+
+  const written = await server.request("tools/call", {
+    name: "write",
+    arguments: {
+      target: note.note_id,
+      body: note.body,
+      comments: [comment],
+      expected_version: 1,
+      overwrite_external_change: false,
+    },
+  });
+  assert.deepEqual(written.structuredContent.note.comments, [comment]);
+
+  const listed = await server.request("tools/call", { name: "list_tree", arguments: {} });
+  assert.deepEqual(listed.structuredContent.notes[0].comments, [comment]);
+
+  const searched = await server.request("tools/call", { name: "search", arguments: { query: "check this claim" } });
+  assert.equal(searched.structuredContent.total, 1);
+  assert.equal(searched.structuredContent.notes[0].note_id, note.note_id);
+
+  // A later write without comments leaves them untouched.
+  const rewritten = await server.request("tools/call", {
+    name: "write",
+    arguments: { target: note.note_id, body: "Alpha beta gamma delta", expected_version: 2, overwrite_external_change: false },
+  });
+  assert.deepEqual(rewritten.structuredContent.note.comments, [comment]);
+});
+
 test("built package declares only the external identity and valid asset hashes", async () => {
   const dist = join(here, "..", "dist");
   const app = JSON.parse(await readFile(join(dist, "app.json"), "utf8"));

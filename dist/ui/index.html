@@ -4016,6 +4016,38 @@ ${component_stack}
   var event_symbol = Symbol("events");
   var all_registered_events = /* @__PURE__ */ new Set();
   var root_event_handles = /* @__PURE__ */ new Set();
+  function create_event(event_name, dom, handler, options = {}) {
+    function target_handler(event2) {
+      if (!options.capture) {
+        handle_event_propagation.call(dom, event2);
+      }
+      if (!event2.cancelBubble) {
+        return without_reactive_context(() => {
+          return handler?.call(this, event2);
+        });
+      }
+    }
+    if (event_name.startsWith("pointer") || event_name.startsWith("touch") || event_name === "wheel") {
+      queue_micro_task(() => {
+        dom.addEventListener(event_name, target_handler, options);
+      });
+    } else {
+      dom.addEventListener(event_name, target_handler, options);
+    }
+    return target_handler;
+  }
+  function event(event_name, dom, handler, capture2, passive2) {
+    var options = { capture: capture2, passive: passive2 };
+    var target_handler = create_event(event_name, dom, handler, options);
+    if (dom === document.body || // @ts-ignore
+    dom === window || // @ts-ignore
+    dom === document || // Firefox has quirky behavior, it can happen that we still get "canplay" events when the element is already removed
+    dom instanceof HTMLMediaElement) {
+      teardown(() => {
+        dom.removeEventListener(event_name, target_handler, options);
+      });
+    }
+  }
   function delegated(event_name, element2, handler) {
     (element2[event_symbol] ??= {})[event_name] = handler;
   }
@@ -5753,6 +5785,22 @@ ${component_stack}
     ((window.__svelte ??= {}).v ??= /* @__PURE__ */ new Set()).add(PUBLIC_VERSION);
   }
 
+  // src/surface/noteComments.ts
+  function locateNoteComment(body, comment2) {
+    let from = comment2.selection_start;
+    let to = comment2.selection_end;
+    if (body.slice(from, to) !== comment2.selected_text) {
+      const contextualMatch = `${comment2.context_before}${comment2.selected_text}${comment2.context_after}`;
+      const contextStart = body.indexOf(contextualMatch);
+      const contextIsUnique = contextStart >= 0 && body.indexOf(contextualMatch, contextStart + 1) < 0;
+      const quoteStart = body.indexOf(comment2.selected_text);
+      const quoteIsUnique = quoteStart >= 0 && body.indexOf(comment2.selected_text, quoteStart + 1) < 0;
+      from = contextIsUnique ? contextStart + comment2.context_before.length : quoteIsUnique ? quoteStart : -1;
+      to = from + comment2.selected_text.length;
+    }
+    return from >= 0 && to <= body.length && from < to ? { from, to } : null;
+  }
+
   // src/surface/NotesPanel.svelte
   var root = from_html(`<p class="svelte-1q2g4h2">Loading notes\u2026</p>`);
   var root_1 = from_html(`<p class="svelte-1q2g4h2">No matching notes.</p>`);
@@ -5761,11 +5809,20 @@ ${component_stack}
   var root_4 = from_html(`<span class="tag svelte-1q2g4h2"> <button type="button" class="svelte-1q2g4h2">\xD7</button></span>`);
   var root_5 = from_html(`<button type="button" class="svelte-1q2g4h2">Retry</button>`);
   var root_6 = from_html(`<button type="button" class="svelte-1q2g4h2">Load file, discard draft</button> <button type="button" class="svelte-1q2g4h2">Overwrite with draft</button>`, 1);
-  var root_7 = from_html(`<div class="backdrop svelte-1q2g4h2" role="presentation"><div class="dialog svelte-1q2g4h2" role="dialog" aria-modal="true" aria-labelledby="delete-title" tabindex="-1"><h2 id="delete-title" class="svelte-1q2g4h2">Delete this note?</h2> <p class="svelte-1q2g4h2"> </p> <div class="dialog-actions svelte-1q2g4h2"><button type="button" class="svelte-1q2g4h2">Keep note</button> <button class="danger svelte-1q2g4h2" type="button">Delete note</button></div></div></div>`);
-  var root_8 = from_html(`<main><aside aria-label="Notes list" class="svelte-1q2g4h2"><div class="list-tools svelte-1q2g4h2"><button class="new svelte-1q2g4h2" type="button">New note</button> <input type="search" aria-label="Search notes" placeholder="Search notes" class="svelte-1q2g4h2"/></div> <button class="list-toggle svelte-1q2g4h2" type="button"> </button> <div class="note-list svelte-1q2g4h2"><!></div></aside> <section class="editor svelte-1q2g4h2" aria-labelledby="editor-title"><header class="svelte-1q2g4h2"><input id="editor-title" class="title svelte-1q2g4h2" placeholder="Untitled note" aria-label="Note title"/> <div class="actions svelte-1q2g4h2"><button type="button" class="svelte-1q2g4h2">Save</button> <!></div></header> <div class="tags svelte-1q2g4h2" aria-label="Note tags"><span class="tag-label svelte-1q2g4h2">Tags</span> <!> <input placeholder="Add tag" aria-label="Add tag" maxlength="32" class="svelte-1q2g4h2"/> <button class="add-tag svelte-1q2g4h2" type="button">Add</button></div> <div role="status" aria-live="polite"><span class="svelte-1q2g4h2"> </span> <!> <!></div> <textarea aria-label="Note body" placeholder="Write in Markdown\u2026" spellcheck="true" class="svelte-1q2g4h2"></textarea></section> <!></main>`);
+  var root_7 = from_html(`<span class="selection-summary svelte-1q2g4h2"> </span>`);
+  var root_8 = from_html(`<span class="selection-summary hint svelte-1q2g4h2">Select text in the note to comment on it.</span>`);
+  var root_9 = from_html(`<button type="button" class="svelte-1q2g4h2"> </button>`);
+  var root_10 = from_html(`<section class="comment-composer svelte-1q2g4h2" aria-label="Add comment to selection"><label for="selection-comment" class="svelte-1q2g4h2"> </label> <textarea id="selection-comment" rows="3" placeholder="Write your comment" class="svelte-1q2g4h2"></textarea> <div class="comment-actions svelte-1q2g4h2"><button type="button" class="primary svelte-1q2g4h2">Add comment</button> <button type="button" class="svelte-1q2g4h2">Cancel</button></div></section>`);
+  var root_11 = from_html(`<p class="comment-unanchored svelte-1q2g4h2">The commented text has changed; showing the original quote.</p>`);
+  var root_12 = from_html(`<textarea class="comment-edit svelte-1q2g4h2" rows="2"></textarea> <div class="comment-actions svelte-1q2g4h2"><button type="button" class="primary svelte-1q2g4h2">Save comment</button> <button type="button" class="svelte-1q2g4h2">Cancel</button></div>`, 1);
+  var root_13 = from_html(`<p class="comment-text svelte-1q2g4h2"> </p> <div class="comment-actions svelte-1q2g4h2"><button type="button" class="svelte-1q2g4h2">Edit</button> <button type="button" class="danger svelte-1q2g4h2">Remove</button></div>`, 1);
+  var root_14 = from_html(`<article class="comment-card svelte-1q2g4h2"><button class="comment-quote svelte-1q2g4h2" type="button"><q class="svelte-1q2g4h2"> </q></button> <!> <!></article>`);
+  var root_15 = from_html(`<section class="comments svelte-1q2g4h2" aria-label="Note comments"></section>`);
+  var root_16 = from_html(`<div class="backdrop svelte-1q2g4h2" role="presentation"><div class="dialog svelte-1q2g4h2" role="dialog" aria-modal="true" aria-labelledby="delete-title" tabindex="-1"><h2 id="delete-title" class="svelte-1q2g4h2">Delete this note?</h2> <p class="svelte-1q2g4h2"> </p> <div class="dialog-actions svelte-1q2g4h2"><button type="button" class="svelte-1q2g4h2">Keep note</button> <button class="danger svelte-1q2g4h2" type="button">Delete note</button></div></div></div>`);
+  var root_17 = from_html(`<main><aside aria-label="Notes list" class="svelte-1q2g4h2"><div class="list-tools svelte-1q2g4h2"><button class="new svelte-1q2g4h2" type="button">New note</button> <input type="search" aria-label="Search notes" placeholder="Search notes" class="svelte-1q2g4h2"/></div> <button class="list-toggle svelte-1q2g4h2" type="button"> </button> <div class="note-list svelte-1q2g4h2"><!></div></aside> <section class="editor svelte-1q2g4h2" aria-labelledby="editor-title"><header class="svelte-1q2g4h2"><input id="editor-title" class="title svelte-1q2g4h2" placeholder="Untitled note" aria-label="Note title"/> <div class="actions svelte-1q2g4h2"><button type="button" class="svelte-1q2g4h2">Save</button> <!></div></header> <div class="tags svelte-1q2g4h2" aria-label="Note tags"><span class="tag-label svelte-1q2g4h2">Tags</span> <!> <input placeholder="Add tag" aria-label="Add tag" maxlength="32" class="svelte-1q2g4h2"/> <button class="add-tag svelte-1q2g4h2" type="button">Add</button></div> <div role="status" aria-live="polite"><span class="svelte-1q2g4h2"> </span> <!> <!></div> <div class="comment-bar svelte-1q2g4h2"><!> <button type="button" class="svelte-1q2g4h2">Add comment</button> <!></div> <!> <textarea class="body svelte-1q2g4h2" aria-label="Note body" placeholder="Write in Markdown\u2026" spellcheck="true"></textarea> <!></section> <!></main>`);
   var $$css = {
     hash: "svelte-1q2g4h2",
-    code: '* {box-sizing:border-box;}html, body {margin:0;min-height:100%;}body {font:0.95rem/1.5 ui-sans-serif, system-ui, sans-serif;background:#f5f1e8;color:#27231d;}button.svelte-1q2g4h2, input.svelte-1q2g4h2, textarea.svelte-1q2g4h2 {font:inherit;}button.svelte-1q2g4h2 {min-height:2rem;border:1px solid #b8ad9c;border-radius:0.55rem;background:#fffdf8;color:inherit;padding:0.35rem 0.7rem;cursor:pointer;}button.svelte-1q2g4h2:focus-visible, input.svelte-1q2g4h2:focus-visible, textarea.svelte-1q2g4h2:focus-visible {outline:3px solid #9d5d2e;outline-offset:2px;}button.svelte-1q2g4h2:disabled {opacity:0.55;cursor:default;}main.svelte-1q2g4h2 {min-height:min(76dvh, 54rem);display:grid;grid-template-columns:minmax(13rem, 18rem) minmax(0, 1fr);background:#fffdf8;}aside.svelte-1q2g4h2 {min-width:0;border-right:1px solid #d8cfc0;background:#eee7da;display:flex;flex-direction:column;}.list-tools.svelte-1q2g4h2 {display:grid;gap:0.55rem;padding:0.8rem;}.new.svelte-1q2g4h2 {background:#623b25;color:#fffaf2;border-color:#623b25;font-weight:700;}.list-tools.svelte-1q2g4h2 input:where(.svelte-1q2g4h2) {width:100%;min-width:0;border:1px solid #c8bdad;border-radius:0.55rem;background:#fffdf8;padding:0.5rem 0.65rem;}.list-toggle.svelte-1q2g4h2 {display:none;}.note-list.svelte-1q2g4h2 {min-height:0;overflow-y:auto;display:grid;align-content:start;gap:0.2rem;padding:0 0.45rem 0.7rem;}.note-list.svelte-1q2g4h2 > button:where(.svelte-1q2g4h2) {min-width:0;display:grid;gap:0.1rem;text-align:left;border-color:transparent;background:transparent;padding:0.65rem;}.note-list.svelte-1q2g4h2 > button.active:where(.svelte-1q2g4h2) {background:#fffdf8;border-color:#c8bdad;}.note-list.svelte-1q2g4h2 strong:where(.svelte-1q2g4h2), .note-list.svelte-1q2g4h2 small:where(.svelte-1q2g4h2) {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}.note-list.svelte-1q2g4h2 small:where(.svelte-1q2g4h2) {color:#706558;}.note-list.svelte-1q2g4h2 p:where(.svelte-1q2g4h2) {padding:0 0.5rem;color:#706558;}.editor.svelte-1q2g4h2 {min-width:0;min-height:0;display:grid;grid-template-rows:auto auto 3.25rem minmax(18rem, 1fr);}header.svelte-1q2g4h2 {min-width:0;display:flex;align-items:center;gap:0.7rem;padding:0.7rem 1rem;border-bottom:1px solid #e4ddd2;}.title.svelte-1q2g4h2 {min-width:0;flex:1;border:none;background:transparent;color:inherit;font:700 clamp(1.05rem, 0.98rem + 0.35vw, 1.3rem)/1.3 ui-serif, Georgia, serif;padding:0.35rem;}.actions.svelte-1q2g4h2, .dialog-actions.svelte-1q2g4h2 {display:flex;flex-wrap:wrap;gap:0.45rem;}.danger.svelte-1q2g4h2 {color:#8a2525;border-color:#d9a4a0;background:#fff2f0;}.tags.svelte-1q2g4h2 {min-width:0;display:flex;align-items:center;flex-wrap:wrap;gap:0.35rem;padding:0.5rem 1rem;border-bottom:1px solid #e4ddd2;background:#faf6ee;}.tag-label.svelte-1q2g4h2 {color:#706558;font-size:0.8rem;font-weight:700;}.tag.svelte-1q2g4h2 {display:inline-flex;align-items:center;gap:0.2rem;border-radius:999px;background:#ead8c6;padding:0.15rem 0.25rem 0.15rem 0.55rem;font-size:0.8rem;}.tag.svelte-1q2g4h2 button:where(.svelte-1q2g4h2) {min-width:1.5rem;min-height:1.5rem;border:none;border-radius:50%;background:transparent;padding:0;}.tags.svelte-1q2g4h2 input:where(.svelte-1q2g4h2) {min-width:6rem;flex:1;border:none;background:transparent;padding:0.35rem;}.add-tag.svelte-1q2g4h2 {min-height:1.8rem;padding-block:0.2rem;}.status.svelte-1q2g4h2 {min-width:0;height:3.25rem;overflow:auto;display:flex;align-items:center;flex-wrap:wrap;gap:0.5rem;padding:0.4rem 1rem;color:#706558;font-size:0.82rem;border-bottom:1px solid #e4ddd2;}.status.svelte-1q2g4h2 span:where(.svelte-1q2g4h2) {min-width:0;flex:1;overflow-wrap:anywhere;}.status.failed.svelte-1q2g4h2 {color:#8a2525;background:#fff2f0;}textarea.svelte-1q2g4h2 {width:100%;min-width:0;min-height:0;resize:none;overflow:auto;border:none;background:#fffdf8;color:inherit;padding:clamp(1rem, 0.7rem + 1.2vw, 2rem);font:1rem/1.65 ui-monospace, "Cascadia Code", monospace;}.backdrop.svelte-1q2g4h2 {position:fixed;inset:0;z-index:10;display:grid;place-items:center;padding:1rem;background:#27231dcc;}.dialog.svelte-1q2g4h2 {width:min(100%, 28rem);border-radius:0.85rem;background:#fffdf8;padding:1.2rem;box-shadow:0 1rem 3rem #27231d55;}.dialog.svelte-1q2g4h2 h2:where(.svelte-1q2g4h2) {margin:0;font:700 1.2rem/1.3 ui-serif, Georgia, serif;}.dialog.svelte-1q2g4h2 p:where(.svelte-1q2g4h2) {margin:0.6rem 0 1rem;}.dialog-actions.svelte-1q2g4h2 {justify-content:flex-end;}html[data-theme="dark"] body,\n  html[data-theme="dark"] main.svelte-1q2g4h2,\n  html[data-theme="dark"] textarea.svelte-1q2g4h2,\n  html[data-theme="dark"] .dialog.svelte-1q2g4h2 {background:#211e19;color:#eee7da;}html[data-theme="dark"] aside.svelte-1q2g4h2 {background:#181611;border-color:#4b443a;}html[data-theme="dark"] button.svelte-1q2g4h2,\n  html[data-theme="dark"] .list-tools.svelte-1q2g4h2 input:where(.svelte-1q2g4h2) {background:#2a261f;border-color:#5c5347;color:inherit;}html[data-theme="dark"] .new.svelte-1q2g4h2 {background:#b36f3d;border-color:#b36f3d;color:#17130f;}html[data-theme="dark"] .note-list.svelte-1q2g4h2 > button.active:where(.svelte-1q2g4h2),\n  html[data-theme="dark"] .tags.svelte-1q2g4h2 {background:#2a261f;border-color:#5c5347;}html[data-theme="dark"] header.svelte-1q2g4h2,\n  html[data-theme="dark"] .tags.svelte-1q2g4h2,\n  html[data-theme="dark"] .status.svelte-1q2g4h2 {border-color:#4b443a;}html[data-theme="dark"] .tag.svelte-1q2g4h2 {background:#513824;}html[data-theme="dark"] .status.failed.svelte-1q2g4h2,\n  html[data-theme="dark"] .danger.svelte-1q2g4h2 {color:#ffc2ba;background:#462522;border-color:#81504a;}html[data-theme="dark"] .backdrop.svelte-1q2g4h2 {background:#000b;}\n  @media (max-width: 42em) {main.svelte-1q2g4h2 {grid-template-columns:minmax(0, 1fr);grid-template-rows:auto minmax(32rem, 1fr);}aside.svelte-1q2g4h2 {border-right:none;border-bottom:1px solid #d8cfc0;}.list-tools.svelte-1q2g4h2 {grid-template-columns:auto minmax(0, 1fr);}.list-toggle.svelte-1q2g4h2 {display:block;margin:0 0.8rem 0.6rem;}.note-list.svelte-1q2g4h2 {display:none;max-height:12rem;}main.list-open.svelte-1q2g4h2 .note-list:where(.svelte-1q2g4h2) {display:grid;}header.svelte-1q2g4h2 {align-items:flex-start;}\n  }\n  @media (max-width: 25em) {.list-tools.svelte-1q2g4h2 {grid-template-columns:minmax(0, 1fr);}header.svelte-1q2g4h2 {flex-wrap:wrap;}.title.svelte-1q2g4h2 {flex-basis:100%;}\n  }\n  @media (prefers-reduced-motion: reduce) {* {scroll-behavior:auto !important;} }'
+    code: '* {box-sizing:border-box;}html, body {margin:0;min-height:100%;}body {font:0.95rem/1.5 ui-sans-serif, system-ui, sans-serif;background:#f5f1e8;color:#27231d;}button.svelte-1q2g4h2, input.svelte-1q2g4h2, textarea.svelte-1q2g4h2 {font:inherit;}button.svelte-1q2g4h2 {min-height:2rem;border:1px solid #b8ad9c;border-radius:0.55rem;background:#fffdf8;color:inherit;padding:0.35rem 0.7rem;cursor:pointer;}button.svelte-1q2g4h2:focus-visible, input.svelte-1q2g4h2:focus-visible, textarea.svelte-1q2g4h2:focus-visible {outline:3px solid #9d5d2e;outline-offset:2px;}button.svelte-1q2g4h2:disabled {opacity:0.55;cursor:default;}\n  /* The host renders this surface full-height (fill mode); own the whole\n     frame and let the note list, body, and comments scroll internally. */main.svelte-1q2g4h2 {height:100vh;height:100dvh;min-height:min(76dvh, 54rem);display:grid;grid-template-columns:minmax(13rem, 18rem) minmax(0, 1fr);background:#fffdf8;}aside.svelte-1q2g4h2 {min-width:0;border-right:1px solid #d8cfc0;background:#eee7da;display:flex;flex-direction:column;}.list-tools.svelte-1q2g4h2 {display:grid;gap:0.55rem;padding:0.8rem;}.new.svelte-1q2g4h2 {background:#623b25;color:#fffaf2;border-color:#623b25;font-weight:700;}.list-tools.svelte-1q2g4h2 input:where(.svelte-1q2g4h2) {width:100%;min-width:0;border:1px solid #c8bdad;border-radius:0.55rem;background:#fffdf8;padding:0.5rem 0.65rem;}.list-toggle.svelte-1q2g4h2 {display:none;}.note-list.svelte-1q2g4h2 {min-height:0;overflow-y:auto;display:grid;align-content:start;gap:0.2rem;padding:0 0.45rem 0.7rem;}.note-list.svelte-1q2g4h2 > button:where(.svelte-1q2g4h2) {min-width:0;display:grid;gap:0.1rem;text-align:left;border-color:transparent;background:transparent;padding:0.65rem;}.note-list.svelte-1q2g4h2 > button.active:where(.svelte-1q2g4h2) {background:#fffdf8;border-color:#c8bdad;}.note-list.svelte-1q2g4h2 strong:where(.svelte-1q2g4h2), .note-list.svelte-1q2g4h2 small:where(.svelte-1q2g4h2) {overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}.note-list.svelte-1q2g4h2 small:where(.svelte-1q2g4h2) {color:#706558;}.note-list.svelte-1q2g4h2 p:where(.svelte-1q2g4h2) {padding:0 0.5rem;color:#706558;}\n  /* Flex column: the comment composer and comments panel come and go. */.editor.svelte-1q2g4h2 {min-width:0;min-height:0;display:flex;flex-direction:column;}.status.svelte-1q2g4h2 {flex-shrink:0;}header.svelte-1q2g4h2 {min-width:0;flex-shrink:0;display:flex;align-items:center;gap:0.7rem;padding:0.7rem 1rem;border-bottom:1px solid #e4ddd2;}.title.svelte-1q2g4h2 {min-width:0;flex:1;border:none;background:transparent;color:inherit;font:700 clamp(1.05rem, 0.98rem + 0.35vw, 1.3rem)/1.3 ui-serif, Georgia, serif;padding:0.35rem;}.actions.svelte-1q2g4h2, .dialog-actions.svelte-1q2g4h2 {display:flex;flex-wrap:wrap;gap:0.45rem;}.danger.svelte-1q2g4h2 {color:#8a2525;border-color:#d9a4a0;background:#fff2f0;}.tags.svelte-1q2g4h2 {min-width:0;flex-shrink:0;display:flex;align-items:center;flex-wrap:wrap;gap:0.35rem;padding:0.5rem 1rem;border-bottom:1px solid #e4ddd2;background:#faf6ee;}.tag-label.svelte-1q2g4h2 {color:#706558;font-size:0.8rem;font-weight:700;}.tag.svelte-1q2g4h2 {display:inline-flex;align-items:center;gap:0.2rem;border-radius:999px;background:#ead8c6;padding:0.15rem 0.25rem 0.15rem 0.55rem;font-size:0.8rem;}.tag.svelte-1q2g4h2 button:where(.svelte-1q2g4h2) {min-width:1.5rem;min-height:1.5rem;border:none;border-radius:50%;background:transparent;padding:0;}.tags.svelte-1q2g4h2 input:where(.svelte-1q2g4h2) {min-width:6rem;flex:1;border:none;background:transparent;padding:0.35rem;}.add-tag.svelte-1q2g4h2 {min-height:1.8rem;padding-block:0.2rem;}.status.svelte-1q2g4h2 {min-width:0;height:3.25rem;overflow:auto;display:flex;align-items:center;flex-wrap:wrap;gap:0.5rem;padding:0.4rem 1rem;color:#706558;font-size:0.82rem;border-bottom:1px solid #e4ddd2;}.status.svelte-1q2g4h2 span:where(.svelte-1q2g4h2) {min-width:0;flex:1;overflow-wrap:anywhere;}.status.failed.svelte-1q2g4h2 {color:#8a2525;background:#fff2f0;}.body.svelte-1q2g4h2 {flex:1;width:100%;min-width:0;min-height:12rem;resize:none;overflow:auto;border:none;background:#fffdf8;color:inherit;padding:clamp(1rem, 0.7rem + 1.2vw, 2rem);font:1rem/1.65 ui-monospace, "Cascadia Code", monospace;}.comment-bar.svelte-1q2g4h2 {min-width:0;flex-shrink:0;display:flex;align-items:center;flex-wrap:wrap;gap:0.5rem;padding:0.4rem 1rem;border-bottom:1px solid #e4ddd2;background:#faf6ee;font-size:0.82rem;}.selection-summary.svelte-1q2g4h2 {min-width:0;flex:1 1 10rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}.hint.svelte-1q2g4h2 {color:#706558;}.comment-bar.svelte-1q2g4h2 button:where(.svelte-1q2g4h2) {min-height:1.8rem;padding-block:0.2rem;}.comment-composer.svelte-1q2g4h2 {flex-shrink:0;display:grid;gap:0.45rem;padding:0.6rem 1rem;border-bottom:1px solid #e4ddd2;background:#faf6ee;}.comment-composer.svelte-1q2g4h2 label:where(.svelte-1q2g4h2) {font-size:0.82rem;font-weight:700;color:#706558;overflow-wrap:anywhere;}.comment-composer.svelte-1q2g4h2 textarea:where(.svelte-1q2g4h2), .comment-edit.svelte-1q2g4h2 {width:100%;min-width:0;resize:vertical;border:1px solid #c8bdad;border-radius:0.55rem;background:#fffdf8;color:inherit;padding:0.5rem 0.65rem;}.comment-actions.svelte-1q2g4h2 {display:flex;flex-wrap:wrap;gap:0.45rem;}.primary.svelte-1q2g4h2 {background:#623b25;color:#fffaf2;border-color:#623b25;font-weight:700;}.comments.svelte-1q2g4h2 {flex-shrink:0;max-height:14rem;overflow-y:auto;display:grid;gap:0.5rem;padding:0.6rem 1rem;border-top:1px solid #e4ddd2;background:#faf6ee;}.comment-card.svelte-1q2g4h2 {display:grid;gap:0.35rem;border:1px solid #e4ddd2;border-radius:0.55rem;background:#fffdf8;padding:0.55rem 0.7rem;}.comment-quote.svelte-1q2g4h2 {min-height:auto;width:fit-content;max-width:100%;text-align:left;border:none;background:transparent;padding:0;color:#9d5d2e;overflow-wrap:anywhere;}.comment-quote.svelte-1q2g4h2 q:where(.svelte-1q2g4h2) {text-decoration:underline;text-underline-offset:0.18em;}.comment-quote.svelte-1q2g4h2:disabled {color:#706558;}.comment-quote.svelte-1q2g4h2:disabled q:where(.svelte-1q2g4h2) {text-decoration:none;}.comment-text.svelte-1q2g4h2 {margin:0;overflow-wrap:anywhere;}.comment-unanchored.svelte-1q2g4h2 {margin:0;font-size:0.78rem;color:#706558;}.backdrop.svelte-1q2g4h2 {position:fixed;inset:0;z-index:10;display:grid;place-items:center;padding:1rem;background:#27231dcc;}.dialog.svelte-1q2g4h2 {width:min(100%, 28rem);border-radius:0.85rem;background:#fffdf8;padding:1.2rem;box-shadow:0 1rem 3rem #27231d55;}.dialog.svelte-1q2g4h2 h2:where(.svelte-1q2g4h2) {margin:0;font:700 1.2rem/1.3 ui-serif, Georgia, serif;}.dialog.svelte-1q2g4h2 p:where(.svelte-1q2g4h2) {margin:0.6rem 0 1rem;}.dialog-actions.svelte-1q2g4h2 {justify-content:flex-end;}html[data-theme="dark"] body,\n  html[data-theme="dark"] main.svelte-1q2g4h2,\n  html[data-theme="dark"] textarea.svelte-1q2g4h2,\n  html[data-theme="dark"] .dialog.svelte-1q2g4h2 {background:#211e19;color:#eee7da;}html[data-theme="dark"] aside.svelte-1q2g4h2 {background:#181611;border-color:#4b443a;}html[data-theme="dark"] button.svelte-1q2g4h2,\n  html[data-theme="dark"] .list-tools.svelte-1q2g4h2 input:where(.svelte-1q2g4h2) {background:#2a261f;border-color:#5c5347;color:inherit;}html[data-theme="dark"] .new.svelte-1q2g4h2,\n  html[data-theme="dark"] .primary.svelte-1q2g4h2 {background:#b36f3d;border-color:#b36f3d;color:#17130f;}html[data-theme="dark"] .note-list.svelte-1q2g4h2 > button.active:where(.svelte-1q2g4h2),\n  html[data-theme="dark"] .tags.svelte-1q2g4h2 {background:#2a261f;border-color:#5c5347;}html[data-theme="dark"] header.svelte-1q2g4h2,\n  html[data-theme="dark"] .tags.svelte-1q2g4h2,\n  html[data-theme="dark"] .status.svelte-1q2g4h2 {border-color:#4b443a;}html[data-theme="dark"] .comment-bar.svelte-1q2g4h2,\n  html[data-theme="dark"] .comment-composer.svelte-1q2g4h2,\n  html[data-theme="dark"] .comments.svelte-1q2g4h2 {background:#2a261f;border-color:#4b443a;}html[data-theme="dark"] .comment-composer.svelte-1q2g4h2 textarea:where(.svelte-1q2g4h2),\n  html[data-theme="dark"] .comment-edit.svelte-1q2g4h2 {border-color:#5c5347;}html[data-theme="dark"] .comment-card.svelte-1q2g4h2 {background:#211e19;border-color:#4b443a;}html[data-theme="dark"] .comment-quote.svelte-1q2g4h2 {background:transparent;border:none;color:#e0a370;}html[data-theme="dark"] .comment-quote.svelte-1q2g4h2:disabled,\n  html[data-theme="dark"] .hint.svelte-1q2g4h2,\n  html[data-theme="dark"] .comment-unanchored.svelte-1q2g4h2,\n  html[data-theme="dark"] .comment-composer.svelte-1q2g4h2 label:where(.svelte-1q2g4h2) {color:#a89d8d;}html[data-theme="dark"] .tag.svelte-1q2g4h2 {background:#513824;}html[data-theme="dark"] .status.failed.svelte-1q2g4h2,\n  html[data-theme="dark"] .danger.svelte-1q2g4h2 {color:#ffc2ba;background:#462522;border-color:#81504a;}html[data-theme="dark"] .backdrop.svelte-1q2g4h2 {background:#000b;}\n  @media (max-width: 42em) {main.svelte-1q2g4h2 {grid-template-columns:minmax(0, 1fr);grid-template-rows:auto minmax(32rem, 1fr);}aside.svelte-1q2g4h2 {border-right:none;border-bottom:1px solid #d8cfc0;}.list-tools.svelte-1q2g4h2 {grid-template-columns:auto minmax(0, 1fr);}.list-toggle.svelte-1q2g4h2 {display:block;margin:0 0.8rem 0.6rem;}.note-list.svelte-1q2g4h2 {display:none;max-height:12rem;}main.list-open.svelte-1q2g4h2 .note-list:where(.svelte-1q2g4h2) {display:grid;}header.svelte-1q2g4h2 {align-items:flex-start;}\n  }\n  @media (max-width: 25em) {.list-tools.svelte-1q2g4h2 {grid-template-columns:minmax(0, 1fr);}header.svelte-1q2g4h2 {flex-wrap:wrap;}.title.svelte-1q2g4h2 {flex-basis:100%;}\n  }\n  @media (prefers-reduced-motion: reduce) {* {scroll-behavior:auto !important;} }'
   };
   function NotesPanel($$anchor, $$props) {
     push($$props, true);
@@ -5792,10 +5849,20 @@ ${component_stack}
     let deleteButton = state(void 0);
     let deleteCancelButton = state(void 0);
     let deleteConfirmButton = state(void 0);
+    let bodyInput = state(void 0);
+    let comments = state(proxy([]));
+    let selection = state(null);
+    let commentComposerOpen = state(false);
+    let commentComposerInput = state(void 0);
+    let commentTarget = state(null);
+    let commentDraft = state("");
+    let commentsOpen = state(false);
+    let editingCommentId = state(null);
+    let editingCommentText = state("");
     const selected = user_derived(() => get2(notes).find((note) => note.note_id === get2(selectedId)) ?? null);
     const filtered = user_derived(() => get2(notes).filter((note) => {
       const term = get2(query).trim().toLocaleLowerCase("en-US");
-      return term === "" || note.title.toLocaleLowerCase("en-US").includes(term) || note.body.toLocaleLowerCase("en-US").includes(term) || note.tags.some((tag2) => tag2.includes(term));
+      return term === "" || note.title.toLocaleLowerCase("en-US").includes(term) || note.body.toLocaleLowerCase("en-US").includes(term) || note.tags.some((tag2) => tag2.includes(term)) || note.comments.some((comment2) => comment2.text.toLocaleLowerCase("en-US").includes(term) || comment2.selected_text.toLocaleLowerCase("en-US").includes(term));
     }));
     function completed(outcome) {
       const result = outcome?.result;
@@ -5808,7 +5875,14 @@ ${component_stack}
     }
     async function refresh(preferId = get2(selectedId)) {
       const result = await invoke("list_tree", {});
-      set(notes, Array.isArray(result?.notes) ? result.notes : [], true);
+      set(
+        notes,
+        (Array.isArray(result?.notes) ? result.notes : []).map((note) => ({
+          ...note,
+          comments: Array.isArray(note.comments) ? note.comments : []
+        })),
+        true
+      );
       if (preferId && get2(notes).some((note) => note.note_id === preferId)) set(selectedId, preferId, true);
     }
     function edit() {
@@ -5825,6 +5899,15 @@ ${component_stack}
       }
       resetNewNote();
     }
+    function resetCommentUi() {
+      set(selection, null);
+      set(commentComposerOpen, false);
+      set(commentTarget, null);
+      set(commentDraft, "");
+      set(commentsOpen, false);
+      set(editingCommentId, null);
+      set(editingCommentText, "");
+    }
     function resetNewNote() {
       if (saveTimer) clearTimeout(saveTimer);
       set(selectedId, null);
@@ -5833,6 +5916,8 @@ ${component_stack}
       set(body, "");
       set(tags, [], true);
       set(tagDraft, "");
+      set(comments, [], true);
+      resetCommentUi();
       set(saveState, "idle");
       set(externalConflict, false);
       set(message, "New note");
@@ -5850,6 +5935,8 @@ ${component_stack}
       set(body, note.body, true);
       set(tags, [...note.tags], true);
       set(tagDraft, "");
+      set(comments, [...note.comments ?? []], true);
+      resetCommentUi();
       set(saveState, "idle");
       set(externalConflict, note.externally_modified, true);
       set(message, note.externally_modified ? "Changed outside Notes" : "Up to date", true);
@@ -5864,7 +5951,8 @@ ${component_stack}
       const submitted = {
         title: get2(title),
         body: get2(body),
-        tags: [...get2(tags)]
+        tags: [...get2(tags)],
+        comments: get2(comments).map((comment2) => ({ ...comment2 }))
       };
       set(saveState, "saving");
       set(message, "Saving");
@@ -5874,6 +5962,7 @@ ${component_stack}
           body: submitted.body,
           title: submitted.title,
           tags: submitted.tags,
+          comments: submitted.comments,
           expected_version: get2(savedVersion),
           overwrite_external_change: overwrite
         }) : await invoke("create", submitted);
@@ -5947,6 +6036,103 @@ ${component_stack}
         addTag();
       }
     }
+    function updateSelection() {
+      const element2 = get2(bodyInput);
+      if (!element2) return;
+      const from = element2.selectionStart ?? 0;
+      const to = element2.selectionEnd ?? 0;
+      set(
+        selection,
+        from < to ? { from, to, text: get2(body).slice(from, to) } : null,
+        true
+      );
+    }
+    function contextAround(from, to) {
+      return {
+        before: get2(body).slice(Math.max(0, from - 180), from),
+        after: get2(body).slice(to, Math.min(get2(body).length, to + 180))
+      };
+    }
+    function selectionPreview(text2) {
+      const oneLine = text2.replace(/\s+/g, " ").trim();
+      return oneLine.length > 80 ? `${oneLine.slice(0, 77)}...` : oneLine;
+    }
+    function commentId() {
+      return typeof crypto !== "undefined" && "randomUUID" in crypto ? `comment-${crypto.randomUUID()}` : `comment-${Date.now()}-${Math.floor(Math.random() * 1e9)}`;
+    }
+    async function openCommentComposer() {
+      if (!get2(selection)) return;
+      set(commentTarget, get2(selection), true);
+      set(commentDraft, "");
+      set(commentComposerOpen, true);
+      await tick();
+      get2(commentComposerInput)?.focus();
+    }
+    function closeCommentComposer() {
+      set(commentComposerOpen, false);
+      set(commentTarget, null);
+      set(commentDraft, "");
+    }
+    function addComment() {
+      const text2 = get2(commentDraft).trim();
+      if (!get2(commentTarget) || text2 === "") return;
+      const context = contextAround(get2(commentTarget).from, get2(commentTarget).to);
+      set(
+        comments,
+        [
+          ...get2(comments),
+          {
+            comment_id: commentId(),
+            text: text2,
+            selected_text: get2(commentTarget).text,
+            selection_start: get2(commentTarget).from,
+            selection_end: get2(commentTarget).to,
+            context_before: context.before,
+            context_after: context.after,
+            created_at: (/* @__PURE__ */ new Date()).toISOString()
+          }
+        ],
+        true
+      );
+      closeCommentComposer();
+      set(commentsOpen, true);
+      edit();
+    }
+    function removeComment(id) {
+      if (get2(editingCommentId) === id) {
+        set(editingCommentId, null);
+        set(editingCommentText, "");
+      }
+      set(comments, get2(comments).filter((comment2) => comment2.comment_id !== id), true);
+      edit();
+    }
+    function startEditComment(comment2) {
+      set(editingCommentId, comment2.comment_id, true);
+      set(editingCommentText, comment2.text, true);
+    }
+    function cancelEditComment() {
+      set(editingCommentId, null);
+      set(editingCommentText, "");
+    }
+    function saveEditComment() {
+      const text2 = get2(editingCommentText).trim();
+      if (get2(editingCommentId) === null || text2 === "") return;
+      const editedId = get2(editingCommentId);
+      set(comments, get2(comments).map((comment2) => comment2.comment_id === editedId ? { ...comment2, text: text2 } : comment2), true);
+      cancelEditComment();
+      edit();
+    }
+    function revealComment(comment2) {
+      const range = locateNoteComment(get2(body), comment2);
+      const element2 = get2(bodyInput);
+      if (!range || !element2) return;
+      element2.focus();
+      element2.setSelectionRange(range.from, range.to);
+      const lineHeight = Number.parseFloat(getComputedStyle(element2).lineHeight) || 24;
+      const linesAbove = get2(body).slice(0, range.from).split("\n").length - 1;
+      element2.scrollTop = Math.max(0, linesAbove * lineHeight - element2.clientHeight / 3);
+      updateSelection();
+    }
     async function deleteNote() {
       if (!get2(selectedId)) return;
       try {
@@ -6002,7 +6188,7 @@ ${component_stack}
         if (saveTimer) clearTimeout(saveTimer);
       };
     });
-    var main = root_8();
+    var main = root_17();
     let classes;
     var aside = child(main);
     var div = child(aside);
@@ -6011,7 +6197,7 @@ ${component_stack}
     remove_input_defaults(input_1);
     reset(div);
     var button_1 = sibling(div, 2);
-    var text2 = child(button_1, true);
+    var text_1 = child(button_1, true);
     reset(button_1);
     var div_1 = sibling(button_1, 2);
     var node = child(div_1);
@@ -6031,18 +6217,18 @@ ${component_stack}
           var button_2 = root_2();
           let classes_1;
           var strong = child(button_2);
-          var text_1 = child(strong, true);
+          var text_2 = child(strong, true);
           reset(strong);
           var small = sibling(strong, 2);
-          var text_2 = child(small, true);
+          var text_3 = child(small, true);
           reset(small);
           reset(button_2);
           template_effect(
             ($0) => {
               set_attribute2(button_2, "aria-current", get2(note).note_id === get2(selectedId) ? "page" : void 0);
               classes_1 = set_class(button_2, 1, "svelte-1q2g4h2", null, classes_1, { active: get2(note).note_id === get2(selectedId) });
-              set_text(text_1, get2(note).title || "Untitled note");
-              set_text(text_2, $0);
+              set_text(text_2, get2(note).title || "Untitled note");
+              set_text(text_3, $0);
             },
             [
               () => get2(note).tags.join(" \xB7 ") || new Date(get2(note).updated_at).toLocaleDateString()
@@ -6085,11 +6271,11 @@ ${component_stack}
     var node_3 = sibling(child(div_3), 2);
     each(node_3, 16, () => get2(tags), (tag2) => tag2, ($$anchor2, tag2) => {
       var span = root_4();
-      var text_3 = child(span, true);
-      var button_5 = sibling(text_3);
+      var text_4 = child(span, true);
+      var button_5 = sibling(text_4);
       reset(span);
       template_effect(() => {
-        set_text(text_3, tag2);
+        set_text(text_4, tag2);
         set_attribute2(button_5, "aria-label", `Remove tag ${tag2}`);
       });
       delegated("click", button_5, () => removeTag(tag2));
@@ -6102,7 +6288,7 @@ ${component_stack}
     var div_4 = sibling(div_3, 2);
     let classes_2;
     var span_1 = child(div_4);
-    var text_4 = child(span_1, true);
+    var text_5 = child(span_1, true);
     reset(span_1);
     var node_4 = sibling(span_1, 2);
     {
@@ -6130,33 +6316,201 @@ ${component_stack}
       });
     }
     reset(div_4);
-    var textarea = sibling(div_4, 2);
-    remove_textarea_child(textarea);
-    reset(section);
-    var node_6 = sibling(section, 2);
+    var div_5 = sibling(div_4, 2);
+    var node_6 = child(div_5);
     {
       var consequent_5 = ($$anchor2) => {
-        var div_5 = root_7();
-        var div_6 = child(div_5);
-        var p_2 = sibling(child(div_6), 2);
-        var text_5 = child(p_2);
-        reset(p_2);
-        var div_7 = sibling(p_2, 2);
-        var button_10 = child(div_7);
-        bind_this(button_10, ($$value) => set(deleteCancelButton, $$value), () => get2(deleteCancelButton));
-        var button_11 = sibling(button_10, 2);
-        bind_this(button_11, ($$value) => set(deleteConfirmButton, $$value), () => get2(deleteConfirmButton));
-        reset(div_7);
-        reset(div_6);
-        reset(div_5);
-        template_effect(() => set_text(text_5, `This permanently deletes \u201C${(get2(title) || "Untitled note") ?? ""}\u201D.`));
-        delegated("keydown", div_6, handleDeleteDialogKeydown);
-        delegated("click", button_10, closeDeleteDialog);
-        delegated("click", button_11, () => void deleteNote());
-        append($$anchor2, div_5);
+        var span_2 = root_7();
+        var text_6 = child(span_2);
+        reset(span_2);
+        template_effect(($0) => set_text(text_6, `\u201C${$0 ?? ""}\u201D`), [() => selectionPreview(get2(selection).text)]);
+        append($$anchor2, span_2);
+      };
+      var alternate_1 = ($$anchor2) => {
+        var span_3 = root_8();
+        append($$anchor2, span_3);
       };
       if_block(node_6, ($$render) => {
-        if (get2(confirmDelete)) $$render(consequent_5);
+        if (get2(selection)) $$render(consequent_5);
+        else $$render(alternate_1, -1);
+      });
+    }
+    var button_10 = sibling(node_6, 2);
+    var node_7 = sibling(button_10, 2);
+    {
+      var consequent_6 = ($$anchor2) => {
+        var button_11 = root_9();
+        var text_7 = child(button_11, true);
+        reset(button_11);
+        template_effect(() => {
+          set_attribute2(button_11, "aria-expanded", get2(commentsOpen));
+          set_text(text_7, get2(comments).length === 1 ? "1 comment" : `${get2(comments).length} comments`);
+        });
+        delegated("click", button_11, () => set(commentsOpen, !get2(commentsOpen)));
+        append($$anchor2, button_11);
+      };
+      if_block(node_7, ($$render) => {
+        if (get2(comments).length > 0) $$render(consequent_6);
+      });
+    }
+    reset(div_5);
+    var node_8 = sibling(div_5, 2);
+    {
+      var consequent_7 = ($$anchor2) => {
+        var section_1 = root_10();
+        var label = child(section_1);
+        var text_8 = child(label);
+        reset(label);
+        var textarea = sibling(label, 2);
+        remove_textarea_child(textarea);
+        bind_this(textarea, ($$value) => set(commentComposerInput, $$value), () => get2(commentComposerInput));
+        var div_6 = sibling(textarea, 2);
+        var button_12 = child(div_6);
+        var button_13 = sibling(button_12, 2);
+        reset(div_6);
+        reset(section_1);
+        template_effect(
+          ($0, $1) => {
+            set_text(text_8, `Comment on \u201C${$0 ?? ""}\u201D`);
+            button_12.disabled = $1;
+          },
+          [
+            () => selectionPreview(get2(commentTarget).text),
+            () => get2(commentDraft).trim() === ""
+          ]
+        );
+        bind_value(textarea, () => get2(commentDraft), ($$value) => set(commentDraft, $$value));
+        delegated("click", button_12, addComment);
+        delegated("click", button_13, closeCommentComposer);
+        append($$anchor2, section_1);
+      };
+      if_block(node_8, ($$render) => {
+        if (get2(commentComposerOpen) && get2(commentTarget)) $$render(consequent_7);
+      });
+    }
+    var textarea_1 = sibling(node_8, 2);
+    remove_textarea_child(textarea_1);
+    bind_this(textarea_1, ($$value) => set(bodyInput, $$value), () => get2(bodyInput));
+    var node_9 = sibling(textarea_1, 2);
+    {
+      var consequent_10 = ($$anchor2) => {
+        var section_2 = root_15();
+        each(section_2, 21, () => get2(comments), (comment2) => comment2.comment_id, ($$anchor3, comment2) => {
+          const anchored = user_derived(() => locateNoteComment(get2(body), get2(comment2)) !== null);
+          var article = root_14();
+          var button_14 = child(article);
+          var q = child(button_14);
+          var text_9 = child(q, true);
+          reset(q);
+          reset(button_14);
+          var node_10 = sibling(button_14, 2);
+          {
+            var consequent_8 = ($$anchor4) => {
+              var p_2 = root_11();
+              append($$anchor4, p_2);
+            };
+            if_block(node_10, ($$render) => {
+              if (!get2(anchored)) $$render(consequent_8);
+            });
+          }
+          var node_11 = sibling(node_10, 2);
+          {
+            var consequent_9 = ($$anchor4) => {
+              var fragment_2 = root_12();
+              var textarea_2 = first_child(fragment_2);
+              remove_textarea_child(textarea_2);
+              var div_7 = sibling(textarea_2, 2);
+              var button_15 = child(div_7);
+              var button_16 = sibling(button_15, 2);
+              reset(div_7);
+              template_effect(
+                ($0, $1) => {
+                  set_attribute2(textarea_2, "aria-label", $0);
+                  button_15.disabled = $1;
+                },
+                [
+                  () => `Edit comment on ${selectionPreview(get2(comment2).selected_text)}`,
+                  () => get2(editingCommentText).trim() === ""
+                ]
+              );
+              bind_value(textarea_2, () => get2(editingCommentText), ($$value) => set(editingCommentText, $$value));
+              delegated("click", button_15, saveEditComment);
+              delegated("click", button_16, cancelEditComment);
+              append($$anchor4, fragment_2);
+            };
+            var alternate_2 = ($$anchor4) => {
+              var fragment_3 = root_13();
+              var p_3 = first_child(fragment_3);
+              var text_10 = child(p_3, true);
+              reset(p_3);
+              var div_8 = sibling(p_3, 2);
+              var button_17 = child(div_8);
+              var button_18 = sibling(button_17, 2);
+              reset(div_8);
+              template_effect(
+                ($0, $1) => {
+                  set_text(text_10, get2(comment2).text);
+                  set_attribute2(button_17, "aria-label", $0);
+                  set_attribute2(button_18, "aria-label", $1);
+                },
+                [
+                  () => `Edit comment on ${selectionPreview(get2(comment2).selected_text)}`,
+                  () => `Remove comment on ${selectionPreview(get2(comment2).selected_text)}`
+                ]
+              );
+              delegated("click", button_17, () => startEditComment(get2(comment2)));
+              delegated("click", button_18, () => removeComment(get2(comment2).comment_id));
+              append($$anchor4, fragment_3);
+            };
+            if_block(node_11, ($$render) => {
+              if (get2(editingCommentId) === get2(comment2).comment_id) $$render(consequent_9);
+              else $$render(alternate_2, -1);
+            });
+          }
+          reset(article);
+          template_effect(
+            ($0) => {
+              button_14.disabled = !get2(anchored);
+              set_attribute2(button_14, "title", get2(anchored) ? "Show in note" : "The commented text has changed");
+              set_text(text_9, $0);
+            },
+            [() => selectionPreview(get2(comment2).selected_text)]
+          );
+          delegated("click", button_14, () => revealComment(get2(comment2)));
+          append($$anchor3, article);
+        });
+        reset(section_2);
+        append($$anchor2, section_2);
+      };
+      if_block(node_9, ($$render) => {
+        if (get2(commentsOpen) && get2(comments).length > 0) $$render(consequent_10);
+      });
+    }
+    reset(section);
+    var node_12 = sibling(section, 2);
+    {
+      var consequent_11 = ($$anchor2) => {
+        var div_9 = root_16();
+        var div_10 = child(div_9);
+        var p_4 = sibling(child(div_10), 2);
+        var text_11 = child(p_4);
+        reset(p_4);
+        var div_11 = sibling(p_4, 2);
+        var button_19 = child(div_11);
+        bind_this(button_19, ($$value) => set(deleteCancelButton, $$value), () => get2(deleteCancelButton));
+        var button_20 = sibling(button_19, 2);
+        bind_this(button_20, ($$value) => set(deleteConfirmButton, $$value), () => get2(deleteConfirmButton));
+        reset(div_11);
+        reset(div_10);
+        reset(div_9);
+        template_effect(() => set_text(text_11, `This permanently deletes \u201C${(get2(title) || "Untitled note") ?? ""}\u201D.`));
+        delegated("keydown", div_10, handleDeleteDialogKeydown);
+        delegated("click", button_19, closeDeleteDialog);
+        delegated("click", button_20, () => void deleteNote());
+        append($$anchor2, div_9);
+      };
+      if_block(node_12, ($$render) => {
+        if (get2(confirmDelete)) $$render(consequent_11);
       });
     }
     reset(main);
@@ -6164,11 +6518,13 @@ ${component_stack}
       ($0) => {
         classes = set_class(main, 1, "svelte-1q2g4h2", null, classes, { "list-open": get2(listOpen) });
         set_attribute2(button_1, "aria-expanded", get2(listOpen));
-        set_text(text2, get2(listOpen) ? "Hide notes" : `Notes (${get2(filtered).length})`);
+        set_text(text_1, get2(listOpen) ? "Hide notes" : `Notes (${get2(filtered).length})`);
         button_3.disabled = get2(saveState) === "saving";
         button_6.disabled = $0;
         classes_2 = set_class(div_4, 1, "status svelte-1q2g4h2", null, classes_2, { failed: get2(saveState) === "failed" });
-        set_text(text_4, get2(message));
+        set_text(text_5, get2(message));
+        button_10.disabled = !get2(selection);
+        set_attribute2(button_10, "aria-expanded", get2(commentComposerOpen));
       },
       [() => !get2(tagDraft).trim()]
     );
@@ -6181,12 +6537,19 @@ ${component_stack}
     delegated("keydown", input_3, tagKeydown);
     bind_value(input_3, () => get2(tagDraft), ($$value) => set(tagDraft, $$value));
     delegated("click", button_6, addTag);
-    delegated("input", textarea, edit);
-    bind_value(textarea, () => get2(body), ($$value) => set(body, $$value));
+    delegated("click", button_10, () => void openCommentComposer());
+    delegated("input", textarea_1, () => {
+      edit();
+      updateSelection();
+    });
+    event("select", textarea_1, updateSelection);
+    delegated("mouseup", textarea_1, updateSelection);
+    delegated("keyup", textarea_1, updateSelection);
+    bind_value(textarea_1, () => get2(body), ($$value) => set(body, $$value));
     append($$anchor, main);
     pop();
   }
-  delegate(["click", "input", "keydown"]);
+  delegate(["click", "input", "keydown", "mouseup", "keyup"]);
 
   // src/surface/main.ts
   mount(NotesPanel, { target: document.body });
