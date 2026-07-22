@@ -194,9 +194,14 @@ test("built package declares only the external identity and valid asset hashes",
   const dist = join(here, "..", "dist");
   const app = JSON.parse(await readFile(join(dist, "app.json"), "utf8"));
   assert.equal(app.id, "com.ma-zierl.notes");
+  assert.equal(app.version, "0.2.1");
+  assert.equal(app.min_host_version, "0.1.0-alpha.1");
   assert.equal(app.backend.kind, "mcp-stdio");
+  assert.equal(app.backend.authority_mode, "unsandboxed");
   assert.equal(app.manifest.surfaces[0].ui.entry, "ui/index.html");
+  assert.equal(app.manifest.grant_requests.every((request) => request.data_scope.kind === "none"), true);
   assert.equal(app.consumer_grant_requests.every((entry) => entry.holder === "chat" && entry.request.scope.provider === app.id), true);
+  assert.equal(app.consumer_grant_requests.every((entry) => entry.request.data_scope.kind === "none"), true);
   for (const [asset, expected] of Object.entries(app.integrity.assets)) {
     const bytes = await readFile(join(dist, asset));
     const actual = `sha256-${createHash("sha256").update(bytes).digest("hex")}`;

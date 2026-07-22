@@ -61,6 +61,7 @@ function grant(holder, capabilityName, condition, reason) {
   return {
     ...(holder ? { holder } : {}),
     scope: { kind: "exact-capability", provider: "com.ma-zierl.notes", capability: capabilityName },
+    data_scope: { kind: "none" },
     condition,
     reason,
     duration: { kind: "non-expiring" },
@@ -112,12 +113,12 @@ function manifest(indexHtml, backend) {
   return {
     format_version: 1,
     id: "com.ma-zierl.notes",
-    version: "0.2.0",
+    version: "0.2.1",
     display_name: "Notes",
     description: "A local Markdown workspace with tags, comments, and autosave.",
     publisher: { name: "Manuel Zierl" },
     license: "MIT",
-    min_host_version: "0.1.0",
+    min_host_version: "0.1.0-alpha.1",
     manifest: {
       capabilities,
       surfaces: [{
@@ -138,7 +139,7 @@ function manifest(indexHtml, backend) {
       { holder: "chat", request: grant(null, "write", "requires-approval", "Let Chat edit a note only after approval.") },
       { holder: "chat", request: grant(null, "delete", "requires-approval", "Let Chat delete a note only after approval.") },
     ],
-    backend: { kind: "mcp-stdio", command: "node", args: ["backend/server.mjs"] },
+    backend: { kind: "mcp-stdio", authority_mode: "unsandboxed", command: "node", args: ["backend/server.mjs"] },
     integrity: { algorithm: "sha256", assets: { "ui/index.html": sha256(indexHtml), "backend/server.mjs": sha256(backend) } },
   };
 }

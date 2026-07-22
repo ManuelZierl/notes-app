@@ -1,14 +1,14 @@
 {
   "format_version": 1,
   "id": "com.ma-zierl.notes",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "display_name": "Notes",
   "description": "A local Markdown workspace with tags, comments, and autosave.",
   "publisher": {
     "name": "Manuel Zierl"
   },
   "license": "MIT",
-  "min_host_version": "0.1.0",
+  "min_host_version": "0.1.0-alpha.1",
   "manifest": {
     "capabilities": [
       {
@@ -323,6 +323,9 @@
           "provider": "com.ma-zierl.notes",
           "capability": "create"
         },
+        "data_scope": {
+          "kind": "none"
+        },
         "condition": "notify",
         "reason": "Create notes from the Notes editor.",
         "duration": {
@@ -334,6 +337,9 @@
           "kind": "exact-capability",
           "provider": "com.ma-zierl.notes",
           "capability": "list_tree"
+        },
+        "data_scope": {
+          "kind": "none"
         },
         "condition": "silent",
         "reason": "List notes to render the Notes workspace.",
@@ -347,6 +353,9 @@
           "provider": "com.ma-zierl.notes",
           "capability": "read"
         },
+        "data_scope": {
+          "kind": "none"
+        },
         "condition": "silent",
         "reason": "Read a selected note.",
         "duration": {
@@ -358,6 +367,9 @@
           "kind": "exact-capability",
           "provider": "com.ma-zierl.notes",
           "capability": "write"
+        },
+        "data_scope": {
+          "kind": "none"
         },
         "condition": "notify",
         "reason": "Save edits made in the Notes editor.",
@@ -371,6 +383,9 @@
           "provider": "com.ma-zierl.notes",
           "capability": "rename"
         },
+        "data_scope": {
+          "kind": "none"
+        },
         "condition": "notify",
         "reason": "Rename note files.",
         "duration": {
@@ -383,6 +398,9 @@
           "provider": "com.ma-zierl.notes",
           "capability": "delete"
         },
+        "data_scope": {
+          "kind": "none"
+        },
         "condition": "requires-approval",
         "reason": "Delete a note only after trusted host approval.",
         "duration": {
@@ -394,6 +412,9 @@
           "kind": "exact-capability",
           "provider": "com.ma-zierl.notes",
           "capability": "search"
+        },
+        "data_scope": {
+          "kind": "none"
         },
         "condition": "silent",
         "reason": "Search notes in the Notes workspace.",
@@ -412,6 +433,9 @@
           "provider": "com.ma-zierl.notes",
           "capability": "list_tree"
         },
+        "data_scope": {
+          "kind": "none"
+        },
         "condition": "silent",
         "reason": "Let Chat list notes when the user asks.",
         "duration": {
@@ -426,6 +450,9 @@
           "kind": "exact-capability",
           "provider": "com.ma-zierl.notes",
           "capability": "search"
+        },
+        "data_scope": {
+          "kind": "none"
         },
         "condition": "silent",
         "reason": "Let Chat search notes when the user asks.",
@@ -442,6 +469,9 @@
           "provider": "com.ma-zierl.notes",
           "capability": "read"
         },
+        "data_scope": {
+          "kind": "none"
+        },
         "condition": "silent",
         "reason": "Let Chat read a note selected by the user request.",
         "duration": {
@@ -456,6 +486,9 @@
           "kind": "exact-capability",
           "provider": "com.ma-zierl.notes",
           "capability": "create"
+        },
+        "data_scope": {
+          "kind": "none"
         },
         "condition": "notify",
         "reason": "Let Chat create a note when the user asks it to remember something.",
@@ -472,6 +505,9 @@
           "provider": "com.ma-zierl.notes",
           "capability": "write"
         },
+        "data_scope": {
+          "kind": "none"
+        },
         "condition": "requires-approval",
         "reason": "Let Chat edit a note only after approval.",
         "duration": {
@@ -487,6 +523,9 @@
           "provider": "com.ma-zierl.notes",
           "capability": "delete"
         },
+        "data_scope": {
+          "kind": "none"
+        },
         "condition": "requires-approval",
         "reason": "Let Chat delete a note only after approval.",
         "duration": {
@@ -497,6 +536,7 @@
   ],
   "backend": {
     "kind": "mcp-stdio",
+    "authority_mode": "unsandboxed",
     "command": "node",
     "args": [
       "backend/server.mjs"
